@@ -22,15 +22,15 @@ class EmbeddingPooler(nn.Module):
 
         _, _, seq_len = embeddings.shape
 
-        if self.pool_mode == "mean":
+        if self.pool_mode == 'mean':
             pooled = F.avg_pool1d(embeddings,
                                   kernel_size = seq_len)
 
-        elif self.pool_mode == "max":
+        elif self.pool_mode == 'max':
             pooled = F.max_pool1d(embeddings,
                                   kernel_size = seq_len)
 
-        elif self.pool_mode == "weighted_mean":
+        elif self.pool_mode == 'weighted_mean':
             _embeddings = embeddings.permute(0, 2, 1)
             #_embeddings = [batch, seq len, emb dim]
             weights = torch.sigmoid(self.fc(_embeddings))
@@ -43,7 +43,7 @@ class EmbeddingPooler(nn.Module):
                                   kernel_size = seq_len)
 
         else:
-            raise ValueError(f"Unknown pool mode: {self.pool_mode}")
+            raise ValueError(f'Unknown pool mode: {self.pool_mode}')
 
         #pooled = [batch size, emb dim, 1]
 
@@ -83,16 +83,26 @@ class RNNEncoder(nn.Module):
                  hid_dim,
                  n_layers,
                  bidirectional,
-                 dropout):
+                 dropout,
+                 rnn_type):
         super().__init__()
+
+        assert rnn_type in ['lstm', 'gru']
 
         self.embedding = nn.Embedding(input_dim, emb_dim)
 
-        self.rnn = nn.GRU(emb_dim, 
-                          hid_dim, 
-                          num_layers = n_layers, 
-                          bidirectional = bidirectional,
-                          dropout = 0 if n_layers < 2 else dropout)
+        if rnn_type == 'gru':
+            self.rnn = nn.GRU(emb_dim, 
+                              hid_dim, 
+                              num_layers = n_layers, 
+                              bidirectional = bidirectional,
+                              dropout = 0 if n_layers < 2 else dropout)
+        else:
+            self.rnn = nn.LSTM(emb_dim,
+                               hid_dim, 
+                               num_layers = n_layers, 
+                               bidirectional = bidirectional,
+                               dropout = 0 if n_layers < 2 else dropout)
 
     def forward(self,
                 tokens):
@@ -106,7 +116,10 @@ class RNNEncoder(nn.Module):
         outputs, hidden = self.rnn(embedded)
 
         #outputs = [seq len, batch size, hid dim * 2 if bidirectional else hid dim]
-        #hidden = [n layers * 2 if bidirectional else n layers, batch size, hid dim]
+        #if rnn is gru:
+        #    hidden = [n layers * 2 if bidirectional else n layers, batch size, hid dim]
+        #if rnn is lstm:
+        #    hidden is a tuple of (hidden, cell) both with the sizes of the gru hidden above
 
         outputs = outputs.permute(1, 2, 0)
 
@@ -114,7 +127,7 @@ class RNNEncoder(nn.Module):
 
         return outputs
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     
     with torch.no_grad():
 
@@ -123,7 +136,7 @@ if __name__ == "__main__":
         batch_size = 32
         seq_len = 10
 
-        print("bow model")
+        print('bow model')
 
         bow_model = BagOfWordsEncoder(vocab_size, emb_dim)
 
@@ -142,13 +155,34 @@ if __name__ == "__main__":
         print(pool_embedder_weighted_mean(embeddings).shape)
 
         hid_dim = 64
+        n_layers = 1
+        bidirectional = False
+        dropout = 0.5
+        rnn_type = 'gru'
+
+        print('gru rnn model')
+
+        rnn_model = RNNEncoder(vocab_size, emb_dim, hid_dim, n_layers, bidirectional, dropout, rnn_type)
+
+        pool_embedder_mean = EmbeddingPooler(hid_dim * 2 if bidirectional else hid_dim, 'mean')
+        pool_embedder_max = EmbeddingPooler(hid_dim * 2 if bidirectional else hid_dim, 'max')
+        pool_embedder_weighted_mean = EmbeddingPooler(hid_dim * 2 if bidirectional else hid_dim, 'weighted_mean')
+
+        embeddings = rnn_model(tokens)
+
+        print(tokens.shape)
+        print(embeddings.shape)
+        print(pool_embedder_mean(embeddings).shape)
+        print(pool_embedder_max(embeddings).shape)
+        print(pool_embedder_weighted_mean(embeddings).shape)
+
+        print('lstm rnn model')
+
         n_layers = 2
         bidirectional = True
-        dropout = 0.5
+        rnn_type = 'lstm'
 
-        print("rnn model")
-
-        rnn_model = RNNEncoder(vocab_size, emb_dim, hid_dim, n_layers, bidirectional, dropout)
+        rnn_model = RNNEncoder(vocab_size, emb_dim, hid_dim, n_layers, bidirectional, dropout, rnn_type)
 
         pool_embedder_mean = EmbeddingPooler(hid_dim * 2 if bidirectional else hid_dim, 'mean')
         pool_embedder_max = EmbeddingPooler(hid_dim * 2 if bidirectional else hid_dim, 'max')
