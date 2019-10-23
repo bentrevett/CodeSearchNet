@@ -53,7 +53,7 @@ class EmbeddingPooler(nn.Module):
 
         return pooled
 
-class NeuralBagOfWords(nn.Module):
+class BagOfWordsEncoder(nn.Module):
     def __init__(self,
                  input_dim,
                  embedding_dim):
@@ -76,6 +76,44 @@ class NeuralBagOfWords(nn.Module):
 
         return embedded
 
+class RNNEncoder(nn.Module):
+    def __init__(self,
+                 input_dim,
+                 emb_dim,
+                 hid_dim,
+                 n_layers,
+                 bidirectional,
+                 dropout):
+        super().__init__()
+
+        self.embedding = nn.Embedding(input_dim, emb_dim)
+
+        self.rnn = nn.GRU(emb_dim, 
+                          hid_dim, 
+                          num_layers = n_layers, 
+                          bidirectional = bidirectional,
+                          dropout = 0 if n_layers < 2 else dropout)
+
+    def forward(self,
+                tokens):
+
+        #tokens = [seq len, batch size]
+
+        embedded = self.embedding(tokens)
+
+        #embedded = [seq len, batch size, emb dim]
+
+        outputs, hidden = self.rnn(embedded)
+
+        #outputs = [seq len, batch size, hid dim * 2 if bidirectional else hid dim]
+        #hidden = [n layers * 2 if bidirectional else n layers, batch size, hid dim]
+
+        outputs = outputs.permute(1, 2, 0)
+
+        #outputs = [batch size, hid dim * 2 if directional else hid dim, seq len]
+
+        return outputs
+
 if __name__ == "__main__":
     
     with torch.no_grad():
@@ -85,7 +123,9 @@ if __name__ == "__main__":
         batch_size = 32
         seq_len = 10
 
-        bag_of_words = NeuralBagOfWords(vocab_size, emb_dim)
+        print("bow model")
+
+        bow_model = BagOfWordsEncoder(vocab_size, emb_dim)
 
         pool_embedder_mean = EmbeddingPooler(emb_dim, 'mean')
         pool_embedder_max = EmbeddingPooler(emb_dim, 'max')
@@ -93,8 +133,29 @@ if __name__ == "__main__":
 
         tokens = torch.randint(vocab_size, (seq_len, batch_size))
 
-        embeddings = bag_of_words(tokens)
+        embeddings = bow_model(tokens)
         
+        print(tokens.shape)
+        print(embeddings.shape)
+        print(pool_embedder_mean(embeddings).shape)
+        print(pool_embedder_max(embeddings).shape)
+        print(pool_embedder_weighted_mean(embeddings).shape)
+
+        hid_dim = 64
+        n_layers = 2
+        bidirectional = True
+        dropout = 0.5
+
+        print("rnn model")
+
+        rnn_model = RNNEncoder(vocab_size, emb_dim, hid_dim, n_layers, bidirectional, dropout)
+
+        pool_embedder_mean = EmbeddingPooler(hid_dim * 2 if bidirectional else hid_dim, 'mean')
+        pool_embedder_max = EmbeddingPooler(hid_dim * 2 if bidirectional else hid_dim, 'max')
+        pool_embedder_weighted_mean = EmbeddingPooler(hid_dim * 2 if bidirectional else hid_dim, 'weighted_mean')
+
+        embeddings = rnn_model(tokens)
+
         print(tokens.shape)
         print(embeddings.shape)
         print(pool_embedder_mean(embeddings).shape)
