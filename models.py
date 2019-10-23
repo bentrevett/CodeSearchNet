@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class PoolEmbedder(nn.Module):
+class EmbeddingPooler(nn.Module):
     def __init__(self,
                  emb_dim,
                  pool_mode):
@@ -87,9 +87,9 @@ if __name__ == "__main__":
 
         bag_of_words = NeuralBagOfWords(vocab_size, emb_dim)
 
-        pool_embedder_mean = PoolEmbedder(emb_dim, 'mean')
-        pool_embedder_max = PoolEmbedder(emb_dim, 'max')
-        pool_embedder_weighted_mean = PoolEmbedder(emb_dim, 'weighted_mean')
+        pool_embedder_mean = EmbeddingPooler(emb_dim, 'mean')
+        pool_embedder_max = EmbeddingPooler(emb_dim, 'max')
+        pool_embedder_weighted_mean = EmbeddingPooler(emb_dim, 'weighted_mean')
 
         tokens = torch.randint(vocab_size, (seq_len, batch_size))
 
