@@ -1,4 +1,5 @@
 import torch
+import torch.nn.init as init
 import torch.optim as optim
 
 from torchtext import data
@@ -18,7 +19,7 @@ parser.add_argument('--lang', type=str, required=True)
 parser.add_argument('--model', type=str, required=True)
 parser.add_argument('--code_max_length', type=int, default=200)
 parser.add_argument('--desc_max_length', type=int, default=30)
-parser.add_argument('--seed', type=int, default=1234)
+parser.add_argument('--seed', type=int, default=None)
 parser.add_argument('--vocab_max_size', type=int, default=10_000)
 parser.add_argument('--vocab_min_freq', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=1024)
@@ -26,17 +27,23 @@ parser.add_argument('--emb_dim', type=int, default=128)
 parser.add_argument('--hid_dim', type=int, default=64)
 parser.add_argument('--n_layers', type=int, default=2)
 parser.add_argument('--bidirectional', action='store_true')
+parser.add_argument('--filter_size', type=int, default=16)
 parser.add_argument('--dropout', type=float, default=0.25)
 parser.add_argument('--pool_mode', type=str, default='weighted_mean')
+parser.add_argument('--loss', type=str, default='softmax')
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--n_epochs', type=int, default=25)
 parser.add_argument('--grad_clip', type=float, default=1)
 args = parser.parse_args()
 
+if args.seed == None:
+    args.seed = random.randint(0, 999)
+
 print(vars(args))
 
-assert args.model in ['bow', 'lstm', 'gru']
+assert args.model in ['bow', 'lstm', 'gru', 'cnn']
 assert args.pool_mode in ['mean', 'max', 'weighted_mean']
+assert args.loss in ['softmax', 'cosine']
 
 random.seed(args.seed)
 np.random.seed(args.seed)
@@ -48,8 +55,8 @@ def cut_code_max_length(tokens):
 def cut_desc_max_length(tokens):
     return tokens[:args.desc_max_length]
 
-CODE = data.Field(preprocessing=cut_code_max_length)
-DESC = data.Field(preprocessing=cut_desc_max_length)
+CODE = data.Field(preprocessing = cut_code_max_length, include_lengths = True)
+DESC = data.Field(preprocessing = cut_desc_max_length, include_lengths = True)
 
 fields = {'code_tokens': ('code', CODE), 'docstring_tokens': ('desc', DESC)}
 
@@ -89,10 +96,12 @@ train_iterator, valid_iterator, test_iterator = data.BucketIterator.splits(
 if args.model == 'bow':
 
     code_encoder = models.BagOfWordsEncoder(len(CODE.vocab),
-                                            args.emb_dim)
+                                            args.emb_dim,
+                                            args.dropout)
 
     desc_encoder = models.BagOfWordsEncoder(len(DESC.vocab),
-                                            args.emb_dim)
+                                            args.emb_dim,
+                                            args.dropout)
 
     code_pooler = models.EmbeddingPooler(args.emb_dim,
                                          args.pool_mode)
@@ -124,8 +133,35 @@ elif args.model in ['gru', 'lstm']:
     desc_pooler = models.EmbeddingPooler(args.hid_dim * 2 if args.bidirectional else args.hid_dim,
                                          args.pool_mode)
 
+elif args.model == 'cnn':
+
+    code_encoder = models.CNNEncoder(len(CODE.vocab),
+                                     args.emb_dim,
+                                     args.filter_size,
+                                     args.n_layers,
+                                     args.dropout,
+                                     device)
+
+    desc_encoder = models.CNNEncoder(len(DESC.vocab),
+                                     args.emb_dim,
+                                     args.filter_size,
+                                     args.n_layers,
+                                     args.dropout,
+                                     device)
+
+    code_pooler = models.EmbeddingPooler(args.emb_dim,
+                                         args.pool_mode)
+
+    desc_pooler = models.EmbeddingPooler(args.emb_dim,
+                                         args.pool_mode)
+
 else:
     raise ValueError(f'Model {args.model} not valid!')
+
+code_encoder.apply(utils.initialize_parameters)
+desc_encoder.apply(utils.initialize_parameters)
+code_pooler.apply(utils.initialize_parameters)
+desc_pooler.apply(utils.initialize_parameters)
 
 code_encoder = code_encoder.to(device)
 desc_encoder = desc_encoder.to(device)
@@ -145,12 +181,18 @@ optimizer = optim.Adam([{'params': code_encoder.parameters()},
                         {'params': desc_pooler.parameters()}],
                         lr = args.lr)
 
-criterion = utils.SoftMaxLoss(device)
+if args.loss == 'softmax':
+    criterion = utils.SoftmaxLoss(device)
+elif args.loss == 'cosine':
+    criterion = utils.CosineLoss(device)
+else:
+    raise ValueError(f'Loss {args.loss} not valid!')
 
 def train(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, optimizer, criterion):
 
     epoch_loss = 0
     epoch_mrr = 0
+    epoch_acc = 0
 
     code_encoder.train()
     desc_encoder.train()
@@ -161,31 +203,43 @@ def train(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, optimi
 
         optimizer.zero_grad()
 
-        encoded_code = code_pooler(code_encoder(batch.code))
-        encoded_desc = desc_pooler(desc_encoder(batch.desc))
+        code, code_lengths = batch.code
+        desc, desc_lengths = batch.desc
+
+        #code/desc = [seq len, batch size]
+
+        code_mask = utils.make_mask(code, CODE.vocab.stoi[CODE.pad_token])
+        desc_mask = utils.make_mask(desc, DESC.vocab.stoi[DESC.pad_token])
+
+        #mask = [batch size, seq len]
+
+        encoded_code = code_pooler(code_encoder(code), code_mask)
+        encoded_desc = desc_pooler(desc_encoder(desc), desc_mask)
 
         #encoded_code/desc = [batch size, emb dim/hid dim/hid dim * 2 (bow/rnn/bi-rnn)]
 
-        loss, mrr = criterion(encoded_code, encoded_desc)
+        loss, mrr, acc = criterion(encoded_code, encoded_desc)
 
         loss.backward()
 
-        torch.nn.utils.clip_grad_value_(code_encoder.parameters(), args.grad_clip)
-        torch.nn.utils.clip_grad_value_(desc_encoder.parameters(), args.grad_clip)
-        torch.nn.utils.clip_grad_value_(code_pooler.parameters(), args.grad_clip)
-        torch.nn.utils.clip_grad_value_(desc_pooler.parameters(), args.grad_clip)
+        torch.nn.utils.clip_grad_norm_(code_encoder.parameters(), args.grad_clip)
+        torch.nn.utils.clip_grad_norm_(desc_encoder.parameters(), args.grad_clip)
+        torch.nn.utils.clip_grad_norm_(code_pooler.parameters(), args.grad_clip)
+        torch.nn.utils.clip_grad_norm_(desc_pooler.parameters(), args.grad_clip)
 
         optimizer.step()
 
         epoch_loss += loss.item()
         epoch_mrr += mrr.item()
+        epoch_acc += acc.item()
 
-    return epoch_loss / len(iterator), epoch_mrr / len(iterator)
+    return epoch_loss / len(iterator), epoch_mrr / len(iterator), epoch_acc / len(iterator)
 
 def evaluate(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, criterion):
 
     epoch_loss = 0
     epoch_mrr = 0
+    epoch_acc = 0
 
     code_encoder.eval()
     desc_encoder.eval()
@@ -196,34 +250,41 @@ def evaluate(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, cri
 
         for batch in tqdm(iterator, desc='Evaluating...'):
 
-            encoded_code = code_pooler(code_encoder(batch.code))
-            encoded_desc = desc_pooler(desc_encoder(batch.desc))
+            code, code_lengths = batch.code
+            desc, desc_lengths = batch.desc
 
-            loss, mrr = criterion(encoded_code, encoded_desc)
+            code_mask = utils.make_mask(code, CODE.vocab.stoi[CODE.pad_token])
+            desc_mask = utils.make_mask(desc, DESC.vocab.stoi[DESC.pad_token])
+
+            encoded_code = code_pooler(code_encoder(code), code_mask)
+            encoded_desc = desc_pooler(desc_encoder(desc), desc_mask)
+
+            loss, mrr, acc = criterion(encoded_code, encoded_desc)
 
             epoch_loss += loss.item()
             epoch_mrr += mrr.item()
+            epoch_acc += acc.item()
 
-    return epoch_loss / len(iterator), epoch_mrr / len(iterator)
+    return epoch_loss / len(iterator), epoch_mrr / len(iterator), epoch_acc / len(iterator)
 
 best_valid_loss = float('inf')
 
 for epoch in range(args.n_epochs):
 
-    train_loss, train_mrr = train(code_encoder,
-                                  desc_encoder,
-                                  code_pooler,
-                                  desc_pooler, 
-                                  train_iterator, 
-                                  optimizer,
-                                  criterion)
+    train_loss, train_mrr, train_acc = train(code_encoder,
+                                             desc_encoder,
+                                             code_pooler,
+                                             desc_pooler, 
+                                             train_iterator, 
+                                             optimizer,
+                                             criterion)
 
-    valid_loss, valid_mrr = evaluate(code_encoder,
-                                     desc_encoder,
-                                     code_pooler,
-                                     desc_pooler, 
-                                     valid_iterator,
-                                     criterion)
+    valid_loss, valid_mrr, valid_acc = evaluate(code_encoder,
+                                                desc_encoder,
+                                                code_pooler,
+                                                desc_pooler, 
+                                                valid_iterator,
+                                                criterion)
 
     if valid_loss < best_valid_loss:
         best_valid_loss = valid_loss
@@ -233,5 +294,5 @@ for epoch in range(args.n_epochs):
         torch.save(desc_pooler.state_dict(), 'desc_pooler.pt')
 
     print(f'Epoch: {epoch+1:02}')
-    print(f'\tTrain Loss: {train_loss:.3f}, Train MRR: {train_mrr:.3f}')
-    print(f'\t Val. Loss: {valid_loss:.3f}, Valid MRR: {valid_mrr:.3f}')
+    print(f'\tTrain Loss: {train_loss:.3f}, Train MRR: {train_mrr:.3f}, Train Acc: {train_acc:.3f}')
+    print(f'\t Val. Loss: {valid_loss:.3f}, Valid MRR: {valid_mrr:.3f}, Valid Acc: {valid_acc:.3f}')

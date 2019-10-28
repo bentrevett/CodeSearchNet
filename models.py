@@ -13,20 +13,28 @@ class EmbeddingPooler(nn.Module):
         self.pool_mode = pool_mode
 
         if pool_mode == 'weighted_mean':
-            self.fc = nn.Linear(emb_dim, 1)
+            self.fc = nn.Linear(emb_dim, 1, bias = False)
 
     def forward(self, 
-                embeddings):
+                embeddings,
+                mask):
 
         #embeddings = [batch, emb dim, seq_len]
+        #mask = [batch, seq len]
 
         _, _, seq_len = embeddings.shape
 
+        mask = mask.unsqueeze(1)
+
+        #mask = [batch, 1, seq len]
+
         if self.pool_mode == 'mean':
+            embeddings = embeddings.masked_fill(mask == 0, 0)
             pooled = F.avg_pool1d(embeddings,
                                   kernel_size = seq_len)
 
         elif self.pool_mode == 'max':
+            embeddings = embeddings.masked_fill(mask == 0, -1e10)
             pooled = F.max_pool1d(embeddings,
                                   kernel_size = seq_len)
 
@@ -38,6 +46,7 @@ class EmbeddingPooler(nn.Module):
             weights = weights.permute(0, 2, 1)
             #weights = [batch, 1, seq len]
             weighted = embeddings * weights
+            weighted = weighted.masked_fill(mask == 0, 0)
             #weighted = [batch, emb dim, seq_len]
             pooled = F.avg_pool1d(weighted,
                                   kernel_size = seq_len)
@@ -56,17 +65,19 @@ class EmbeddingPooler(nn.Module):
 class BagOfWordsEncoder(nn.Module):
     def __init__(self,
                  input_dim,
-                 embedding_dim):
+                 embedding_dim,
+                 dropout):
         super().__init__()
 
         self.embedding = nn.Embedding(input_dim, embedding_dim)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self,
                 tokens):
 
         #tokens = [seq len, batch size]
 
-        embedded = self.embedding(tokens)
+        embedded = self.dropout(self.embedding(tokens))
 
         #embedded = [seq len, batch size, emb dim]
 
@@ -104,12 +115,14 @@ class RNNEncoder(nn.Module):
                                bidirectional = bidirectional,
                                dropout = 0 if n_layers < 2 else dropout)
 
+        self.dropout = nn.Dropout(dropout)
+
     def forward(self,
                 tokens):
 
         #tokens = [seq len, batch size]
 
-        embedded = self.embedding(tokens)
+        embedded = self.dropout(self.embedding(tokens))
 
         #embedded = [seq len, batch size, emb dim]
 
@@ -126,6 +139,72 @@ class RNNEncoder(nn.Module):
         #outputs = [batch size, hid dim * 2 if directional else hid dim, seq len]
 
         return outputs
+
+class CNNEncoder(nn.Module):
+    def __init__(self,
+                 input_dim,
+                 emb_dim,
+                 filter_size,
+                 n_layers,
+                 dropout,
+                 device):
+        super().__init__()
+
+        self.tok_embedding = nn.Embedding(input_dim, emb_dim)
+        self.pos_embedding = nn.Embedding(250, emb_dim)
+
+        filter_sizes = [filter_size for _ in range(n_layers)]
+
+        self.convs = nn.ModuleList([nn.Conv1d(in_channels = emb_dim, out_channels = emb_dim, kernel_size = fs) for fs in filter_sizes])
+
+        self.dropout = nn.Dropout(dropout)
+
+        self.filter_size = filter_size
+        self.device = device
+
+    def forward(self,
+                tokens):
+
+        #tokens = [seq len, batch size]
+
+        tokens = tokens.permute(1, 0)
+
+        #tokens = [batch size, seq len]
+
+        pos = torch.arange(0, tokens.shape[1]).unsqueeze(0).repeat(tokens.shape[0], 1).to(self.device)
+
+        tok_embedded = self.tok_embedding(tokens)
+        pos_embedded = self.pos_embedding(pos)
+
+        embedded = self.dropout(tok_embedded + pos_embedded)
+
+        #embedded = [batch size, seq len, emb dim]
+
+        embedded = embedded.permute(0, 2, 1)
+
+        #embedded = [batch size, emb dim, seq len]
+
+        for i, conv in enumerate(self.convs):
+
+            next_embedded = conv(embedded)
+
+            #next_embedded = [batch size, emb dim, seq len - filter_size + 1]
+
+            to_pad = tokens.shape[-1] - next_embedded.shape[-1]
+
+            left_pad = to_pad // 2
+            right_pad = to_pad - left_pad
+
+            left_padding = torch.zeros_like(next_embedded)[:,:,:left_pad].to(self.device)
+            right_padding = torch.zeros_like(next_embedded)[:,:,:right_pad].to(self.device)
+
+            next_embedded = torch.cat((left_padding, next_embedded, right_padding), dim = -1)
+
+            #next_embedded = [batch size, emb dim, seq len]
+
+            embedded = self.dropout(torch.tanh(next_embedded + embedded))
+
+        return embedded
 
 if __name__ == '__main__':
     
