@@ -150,6 +150,7 @@ criterion = utils.SoftMaxLoss(device)
 def train(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, optimizer, criterion):
 
     epoch_loss = 0
+    epoch_mrr = 0
 
     code_encoder.train()
     desc_encoder.train()
@@ -165,7 +166,7 @@ def train(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, optimi
 
         #encoded_code/desc = [batch size, emb dim/hid dim/hid dim * 2 (bow/rnn/bi-rnn)]
 
-        loss = criterion(encoded_code, encoded_desc)
+        loss, mrr = criterion(encoded_code, encoded_desc)
 
         loss.backward()
 
@@ -177,12 +178,14 @@ def train(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, optimi
         optimizer.step()
 
         epoch_loss += loss.item()
+        epoch_mrr += mrr.item()
 
-    return epoch_loss / len(iterator)
+    return epoch_loss / len(iterator), epoch_mrr / len(iterator)
 
 def evaluate(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, criterion):
 
     epoch_loss = 0
+    epoch_mrr = 0
 
     code_encoder.eval()
     desc_encoder.eval()
@@ -196,30 +199,31 @@ def evaluate(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, cri
             encoded_code = code_pooler(code_encoder(batch.code))
             encoded_desc = desc_pooler(desc_encoder(batch.desc))
 
-            loss = criterion(encoded_code, encoded_desc)
+            loss, mrr = criterion(encoded_code, encoded_desc)
 
             epoch_loss += loss.item()
+            epoch_mrr += mrr.item()
 
-    return epoch_loss / len(iterator)
+    return epoch_loss / len(iterator), epoch_mrr / len(iterator)
 
 best_valid_loss = float('inf')
 
 for epoch in range(args.n_epochs):
 
-    train_loss = train(code_encoder,
-                       desc_encoder,
-                       code_pooler,
-                       desc_pooler, 
-                       train_iterator, 
-                       optimizer,
-                       criterion)
+    train_loss, train_mrr = train(code_encoder,
+                                  desc_encoder,
+                                  code_pooler,
+                                  desc_pooler, 
+                                  train_iterator, 
+                                  optimizer,
+                                  criterion)
 
-    valid_loss = evaluate(code_encoder,
-                          desc_encoder,
-                          code_pooler,
-                          desc_pooler, 
-                          valid_iterator,
-                          criterion)
+    valid_loss, valid_mrr = evaluate(code_encoder,
+                                     desc_encoder,
+                                     code_pooler,
+                                     desc_pooler, 
+                                     valid_iterator,
+                                     criterion)
 
     if valid_loss < best_valid_loss:
         best_valid_loss = valid_loss
@@ -229,5 +233,5 @@ for epoch in range(args.n_epochs):
         torch.save(desc_pooler.state_dict(), 'desc_pooler.pt')
 
     print(f'Epoch: {epoch+1:02}')
-    print(f'\tTrain Loss: {train_loss:.3f}')
-    print(f'\t Val. Loss: {valid_loss:.3f}')
+    print(f'\tTrain Loss: {train_loss:.3f}, Train MRR: {train_mrr:.3f}')
+    print(f'\t Val. Loss: {valid_loss:.3f}, Valid MRR: {valid_mrr:.3f}')

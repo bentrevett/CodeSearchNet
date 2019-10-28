@@ -28,8 +28,23 @@ class SoftMaxLoss(nn.Module):
 
         #logits = [batch size, batch size]
 
+        with torch.no_grad():
+            mrr = mrr_metric(logits)
+
         classes = torch.arange(logits.shape[0]).to(self.device)
 
         loss = F.cross_entropy(logits, classes)
 
-        return loss 
+        return loss, mrr
+
+def mrr_metric(similarity):
+
+    correct_scores = torch.diagonal(similarity)
+
+    compared_scores = similarity >= correct_scores.unsqueeze(-1)
+
+    rr = 1 / compared_scores.float().sum(-1)
+
+    mrr = rr.mean()
+
+    return mrr
