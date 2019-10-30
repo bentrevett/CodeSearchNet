@@ -19,7 +19,7 @@ class EmbeddingPooler(nn.Module):
                 embeddings,
                 mask):
 
-        #embeddings = [batch, emb dim, seq_len]
+        #embeddings = [batch, emb dim, seq len]
         #mask = [batch, seq len]
 
         _, _, seq_len = embeddings.shape
@@ -47,7 +47,7 @@ class EmbeddingPooler(nn.Module):
             #weights = [batch, 1, seq len]
             weighted = embeddings * weights
             weighted = weighted.masked_fill(mask == 0, 0)
-            #weighted = [batch, emb dim, seq_len]
+            #weighted = [batch, emb dim, seq len]
             pooled = F.avg_pool1d(weighted,
                                   kernel_size = seq_len)
 
@@ -205,6 +205,170 @@ class CNNEncoder(nn.Module):
             embedded = self.dropout(torch.tanh(next_embedded + embedded))
 
         return embedded
+
+class TransformerEncoder(nn.Module):
+    def __init__(self,
+                 input_dim,
+                 emb_dim,
+                 hid_dim,
+                 n_layers,
+                 n_heads,
+                 dropout,
+                 pad_idx,
+                 device):
+        super().__init__()
+
+        self.tok_embedding = nn.Embedding(input_dim, emb_dim)
+        self.pos_embedding = nn.Embedding(250, emb_dim)
+
+        self.layers = nn.ModuleList([TransformerEncoderLayer(emb_dim, hid_dim, n_heads, dropout) for _ in range(n_layers)])
+
+        self.layer_norm = nn.LayerNorm(emb_dim)
+        self.dropout = nn.Dropout(dropout)
+
+        self.pad_idx = pad_idx
+        self.device = device
+
+    def forward(self,
+                tokens
+                ):
+
+        #tokens = [seq len, batch size]
+
+        tokens = tokens.permute(1, 0)
+
+        #tokens = [batch size, seq len]
+
+        mask = (tokens != self.pad_idx).unsqueeze(1).unsqueeze(2)
+
+        #mask = [batch size, 1, 1, seq len]
+
+        pos = torch.arange(0, tokens.shape[1]).unsqueeze(0).repeat(tokens.shape[0], 1).to(self.device)
+
+        #pos = [batch size, seq len]
+
+        tok_embedded = self.tok_embedding(tokens)
+        pos_embedded = self.pos_embedding(pos)
+
+        #tok/pos_embedded = [batch size, seq len, emb dim]
+
+        embedded = self.dropout(self.layer_norm(tok_embedded + pos_embedded))
+
+        #embedded = [batch size, seq len, emb dim]
+
+        for layer in self.layers:
+            embedded = layer(embedded, mask)
+
+        #embedded = [batch size, seq len, emb dim]
+
+        embedded = embedded.permute(0, 2, 1)
+
+        #embedded = [batch size, emb dim, seq len]
+
+        return embedded
+
+class TransformerEncoderLayer(nn.Module):
+    def __init__(self,
+                 emb_dim,
+                 hid_dim,
+                 n_heads,
+                 dropout):
+        super().__init__()
+        
+        self.layer_norm = nn.LayerNorm(emb_dim)
+        self.self_attn = MultiHeadAttention(emb_dim, n_heads, dropout)
+        self.fc_1 = nn.Linear(emb_dim, hid_dim)
+        self.fc_2 = nn.Linear(hid_dim, emb_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self,
+                embedded,
+                mask):
+
+        #embedded = [batch size, seq len, emb dim]
+
+        embedded = self.layer_norm(embedded + self.dropout(self.self_attn(embedded, embedded, embedded, mask)))
+
+        #embedded = [batch size, seq len, emb dim]
+
+        embedded = self.layer_norm(embedded + self.dropout(self.fc_2(self.dropout(F.gelu(self.fc_1(embedded))))))
+
+        #embedded = [batch size, seq len, emb dim]
+
+        return embedded
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, 
+                 emb_dim,
+                 n_heads,
+                 dropout):
+        super().__init__()
+
+        assert emb_dim % n_heads == 0
+
+        self.fc_q = nn.Linear(emb_dim, emb_dim)
+        self.fc_k = nn.Linear(emb_dim, emb_dim)
+        self.fc_v = nn.Linear(emb_dim, emb_dim)
+
+        self.fc = nn.Linear(emb_dim, emb_dim)
+
+        self.dropout = nn.Dropout(dropout)
+
+        self.n_heads = n_heads
+        self.emb_dim = emb_dim
+
+    def forward(self,
+                query,
+                key,
+                value,
+                mask = None):
+
+        #query/key/value = [batch size, seq len, emb dim]
+
+        batch_size = query.shape[0]
+
+        q = self.fc_q(query)
+        k = self.fc_k(key)
+        v = self.fc_v(value)
+
+        #q/k/v = [batch size, seq len, emb dim]
+
+        q = q.view(batch_size, -1, self.n_heads, self.emb_dim // self.n_heads).permute(0, 2, 1, 3)
+        k = k.view(batch_size, -1, self.n_heads, self.emb_dim // self.n_heads).permute(0, 2, 1, 3)
+        v = v.view(batch_size, -1, self.n_heads, self.emb_dim // self.n_heads).permute(0, 2, 1, 3)
+
+        #q/k/v = [batch size, n heads, seq len, hid dim // n heads]
+
+        energy = torch.matmul(q, k.permute(0, 1, 3, 2))
+
+        #energy = [batch size, n heads, seq len, seq len]
+
+        energy = energy * (float(self.emb_dim // self.n_heads) ** -0.5)
+
+        if mask is not None:
+            energy = energy.masked_fill(mask == 0, -1e10)
+
+        attention = self.dropout(torch.softmax(energy, dim = -1))
+
+        #attention = [batch size, n heads, seq len, seq len]
+
+        weighted = torch.matmul(attention, v)
+
+        #weighted = [batch size, n heads, seq len, emb dim // n heads]
+
+        weighted = weighted.permute(0, 2, 1, 3).contiguous()
+
+        #weighted = [batch size, n heads, seq len, emb dim // n heads]
+
+        weighted = weighted.view(batch_size, -1, self.n_heads * (self.emb_dim // self.n_heads))
+
+        #weighted = [batch size, seq len, emb dim]
+        
+        weighted = self.fc(weighted)
+
+        #weighted = [batch size, seq len, emb dim]
+
+        return weighted
 
 if __name__ == '__main__':
     

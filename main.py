@@ -22,12 +22,13 @@ parser.add_argument('--desc_max_length', type=int, default=30)
 parser.add_argument('--seed', type=int, default=None)
 parser.add_argument('--vocab_max_size', type=int, default=10_000)
 parser.add_argument('--vocab_min_freq', type=int, default=10)
-parser.add_argument('--batch_size', type=int, default=1024)
+parser.add_argument('--batch_size', type=int, default=1000)
 parser.add_argument('--emb_dim', type=int, default=128)
 parser.add_argument('--hid_dim', type=int, default=64)
 parser.add_argument('--n_layers', type=int, default=2)
 parser.add_argument('--bidirectional', action='store_true')
 parser.add_argument('--filter_size', type=int, default=16)
+parser.add_argument('--n_heads', type=int, default=8)
 parser.add_argument('--dropout', type=float, default=0.25)
 parser.add_argument('--pool_mode', type=str, default='weighted_mean')
 parser.add_argument('--loss', type=str, default='softmax')
@@ -39,9 +40,11 @@ args = parser.parse_args()
 if args.seed == None:
     args.seed = random.randint(0, 999)
 
+args = utils.handle_args(args)
+
 print(vars(args))
 
-assert args.model in ['bow', 'lstm', 'gru', 'cnn']
+assert args.model in ['bow', 'lstm', 'gru', 'cnn', 'transformer']
 assert args.pool_mode in ['mean', 'max', 'weighted_mean']
 assert args.loss in ['softmax', 'cosine']
 
@@ -155,6 +158,35 @@ elif args.model == 'cnn':
     desc_pooler = models.EmbeddingPooler(args.emb_dim,
                                          args.pool_mode)
 
+elif args.model == 'transformer':
+
+    code_pad_idx = CODE.vocab.stoi[CODE.pad_token]
+    desc_pad_idx = DESC.vocab.stoi[DESC.pad_token]
+
+    code_encoder = models.TransformerEncoder(len(CODE.vocab),
+                                             args.emb_dim,
+                                             args.hid_dim,
+                                             args.n_layers,
+                                             args.n_heads,
+                                             args.dropout,
+                                             code_pad_idx,
+                                             device)
+
+    desc_encoder = models.TransformerEncoder(len(DESC.vocab),
+                                             args.emb_dim,
+                                             args.hid_dim,
+                                             args.n_layers,
+                                             args.n_heads,
+                                             args.dropout,
+                                             desc_pad_idx,
+                                             device)
+
+    code_pooler = models.EmbeddingPooler(args.emb_dim,
+                                         args.pool_mode)
+
+    desc_pooler = models.EmbeddingPooler(args.emb_dim,
+                                         args.pool_mode)
+
 else:
     raise ValueError(f'Model {args.model} not valid!')
 
@@ -173,7 +205,10 @@ print(desc_encoder)
 print(code_pooler)
 print(desc_pooler)
 
-print(f'Total number of parameters to train: {utils.count_parameters([code_encoder, desc_encoder, code_pooler, desc_pooler]):,}')
+print(f'Code Encoder parameters: {utils.count_parameters(code_encoder):,}')
+print(f'Desc Encoder parameters: {utils.count_parameters(desc_encoder):,}')
+print(f'Code Pooler parameters: {utils.count_parameters(code_pooler):,}')
+print(f'Desc Pooler parameters: {utils.count_parameters(desc_pooler):,}')
 
 optimizer = optim.Adam([{'params': code_encoder.parameters()},
                         {'params': desc_encoder.parameters()},
@@ -213,8 +248,14 @@ def train(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, optimi
 
         #mask = [batch size, seq len]
 
-        encoded_code = code_pooler(code_encoder(code), code_mask)
-        encoded_desc = desc_pooler(desc_encoder(desc), desc_mask)
+        encoded_code = code_encoder(code)
+        encoded_code = code_pooler(encoded_code, code_mask)
+
+        encoded_desc = desc_encoder(desc)
+        encoded_desc = desc_pooler(encoded_desc, desc_mask)
+
+        #encoded_code = code_pooler(code_encoder(code), code_mask)
+        #encoded_desc = desc_pooler(desc_encoder(desc), desc_mask)
 
         #encoded_code/desc = [batch size, emb dim/hid dim/hid dim * 2 (bow/rnn/bi-rnn)]
 
@@ -256,8 +297,14 @@ def evaluate(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, cri
             code_mask = utils.make_mask(code, CODE.vocab.stoi[CODE.pad_token])
             desc_mask = utils.make_mask(desc, DESC.vocab.stoi[DESC.pad_token])
 
-            encoded_code = code_pooler(code_encoder(code), code_mask)
-            encoded_desc = desc_pooler(desc_encoder(desc), desc_mask)
+            encoded_code = code_encoder(code)
+            encoded_code = code_pooler(encoded_code, code_mask)
+
+            encoded_desc = desc_encoder(desc)
+            encoded_desc = desc_pooler(encoded_desc, desc_mask)
+
+            #encoded_code = code_pooler(code_encoder(code), code_mask)
+            #encoded_desc = desc_pooler(desc_encoder(desc), desc_mask)
 
             loss, mrr, acc = criterion(encoded_code, encoded_desc)
 

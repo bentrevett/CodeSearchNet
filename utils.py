@@ -123,6 +123,33 @@ def initialize_parameters(m):
         if m.bias is not None:
             m.bias.data.fill_(0)
 
+def handle_args(args):
+
+    if args.model == 'bow':
+        del args.hid_dim
+        del args.n_layers
+        del args.bidirectional
+        del args.filter_size
+        del args.n_heads
+
+    elif args.model in ['gru', 'lstm']:
+        del args.filter_size
+        del args.n_heads
+
+    elif args.model == 'cnn':
+        del args.hid_dim
+        del args.bidirectional
+        del args.n_heads
+
+    elif args.model == 'transformer':
+        del args.bidirectional
+        del args.filter_size
+
+    else:
+        raise ValueError(f'Model {args.model} not valid!')
+
+    return args
+
 if __name__ == '__main__':
 
     x = torch.randn(3,3)
