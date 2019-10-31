@@ -37,6 +37,7 @@ parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--n_epochs', type=int, default=500)
 parser.add_argument('--patience', type=int, default=5)
 parser.add_argument('--grad_clip', type=float, default=1)
+parser.add_argument('--save_model', action='store_true')
 args = parser.parse_args()
 
 assert args.model in ['bow', 'lstm', 'gru', 'cnn', 'transformer']
@@ -64,7 +65,7 @@ with open(params_path, 'w+') as f:
         f.write(f'{param}\t{val}\n')
 
 with open(results_path, 'w+') as f:
-    f.write('train_loss\ttrain_mrr\ttrain_acc\tvalid_loss\tvalid_mrr\tvalid_acc\n')
+    f.write('train_loss\ttrain_mrr\tvalid_loss\tvalid_mrr\n')
 
 print(vars(args))
 
@@ -266,7 +267,6 @@ def train(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, optimi
 
     epoch_loss = 0
     epoch_mrr = 0
-    epoch_acc = 0
 
     code_encoder.train()
     desc_encoder.train()
@@ -298,7 +298,7 @@ def train(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, optimi
 
         #encoded_code/desc = [batch size, emb dim/hid dim/hid dim * 2 (bow/rnn/bi-rnn)]
 
-        loss, mrr, acc = criterion(encoded_code, encoded_desc)
+        loss, mrr = criterion(encoded_code, encoded_desc)
 
         loss.backward()
 
@@ -311,15 +311,13 @@ def train(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, optimi
 
         epoch_loss += loss.item()
         epoch_mrr += mrr.item()
-        epoch_acc += acc.item()
 
-    return epoch_loss / len(iterator), epoch_mrr / len(iterator), epoch_acc / len(iterator)
+    return epoch_loss / len(iterator), epoch_mrr / len(iterator)
 
 def evaluate(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, criterion):
 
     epoch_loss = 0
     epoch_mrr = 0
-    epoch_acc = 0
 
     code_encoder.eval()
     desc_encoder.eval()
@@ -345,50 +343,51 @@ def evaluate(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, cri
             #encoded_code = code_pooler(code_encoder(code), code_mask)
             #encoded_desc = desc_pooler(desc_encoder(desc), desc_mask)
 
-            loss, mrr, acc = criterion(encoded_code, encoded_desc)
+            loss, mrr = criterion(encoded_code, encoded_desc)
 
             epoch_loss += loss.item()
             epoch_mrr += mrr.item()
-            epoch_acc += acc.item()
 
-    return epoch_loss / len(iterator), epoch_mrr / len(iterator), epoch_acc / len(iterator)
+    return epoch_loss / len(iterator), epoch_mrr / len(iterator)
 
-best_valid_loss = float('inf')
+best_valid_mrr = float('inf')
 patience_counter = 0
 
 for epoch in range(args.n_epochs):
 
-    train_loss, train_mrr, train_acc = train(code_encoder,
-                                             desc_encoder,
-                                             code_pooler,
-                                             desc_pooler, 
-                                             train_iterator, 
-                                             optimizer,
-                                             criterion)
+    train_loss, train_mrr = train(code_encoder,
+                                  desc_encoder,
+                                  code_pooler,
+                                  desc_pooler, 
+                                  train_iterator, 
+                                  optimizer,
+                                  criterion)
 
-    valid_loss, valid_mrr, valid_acc = evaluate(code_encoder,
-                                                desc_encoder,
-                                                code_pooler,
-                                                desc_pooler, 
-                                                valid_iterator,
-                                                criterion)
+    valid_loss, valid_mrr = evaluate(code_encoder,
+                                     desc_encoder,
+                                     code_pooler,
+                                     desc_pooler, 
+                                     valid_iterator,
+                                     criterion)
 
-    if valid_loss < best_valid_loss:
-        best_valid_loss = valid_loss
-        torch.save(code_encoder.state_dict(), os.path.join(run_path, 'code_encoder.pt'))
-        torch.save(desc_encoder.state_dict(), os.path.join(run_path, 'desc_encoder.pt'))
-        torch.save(code_pooler.state_dict(), os.path.join(run_path, 'code_pooler.pt'))
-        torch.save(desc_pooler.state_dict(), os.path.join(run_path, 'desc_pooler.pt'))
+    if valid_mrr < best_valid_mrr:
+        best_valid_mrr = valid_mrr
         patience_counter = 0
+        if args.save_model:
+            torch.save(code_encoder.state_dict(), os.path.join(run_path, 'code_encoder.pt'))
+            torch.save(desc_encoder.state_dict(), os.path.join(run_path, 'desc_encoder.pt'))
+            torch.save(code_pooler.state_dict(), os.path.join(run_path, 'code_pooler.pt'))
+            torch.save(desc_pooler.state_dict(), os.path.join(run_path, 'desc_pooler.pt'))
+        
     else:
         patience_counter += 1
 
     print(f'Epoch: {epoch+1:02}')
-    print(f'\tTrain Loss: {train_loss:.3f}, Train MRR: {train_mrr:.3f}, Train Acc: {train_acc:.3f}')
-    print(f'\t Val. Loss: {valid_loss:.3f}, Valid MRR: {valid_mrr:.3f}, Valid Acc: {valid_acc:.3f}')
+    print(f'\tTrain Loss: {train_loss:.3f}, Train MRR: {train_mrr:.3f}')
+    print(f'\t Val. Loss: {valid_loss:.3f}, Valid MRR: {valid_mrr:.3f}')
 
     with open(results_path, 'a') as f:
-        f.write(f'{train_loss}\t{train_mrr}\t{train_acc}\t{valid_loss}\t{valid_mrr}\t{valid_acc}\n')
+        f.write(f'{train_loss}\t{train_mrr}\t{valid_loss}\t{valid_mrr}n')
 
     if patience_counter >= args.patience:
         print('Ended early due to losing patience!')

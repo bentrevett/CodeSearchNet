@@ -39,10 +39,7 @@ class SoftmaxLoss(nn.Module):
         with torch.no_grad():
             mrr = mrr_metric(similarity)
 
-        with torch.no_grad():
-            acc = acc_metric(similarity, classes)
-
-        return loss, mrr, acc
+        return loss, mrr
 
 class CosineLoss(nn.Module):
     def __init__(self,
@@ -79,10 +76,7 @@ class CosineLoss(nn.Module):
         with torch.no_grad():
             mrr = mrr_metric(similarity)
 
-        with torch.no_grad():
-            acc = acc_metric(similarity, classes)
-
-        return loss, mrr, acc
+        return loss, mrr
 
 def mrr_metric(similarity):
     correct_scores = torch.diagonal(similarity)
@@ -90,12 +84,6 @@ def mrr_metric(similarity):
     rr = 1 / compared_scores.float().sum(-1)
     mrr = rr.mean()
     return mrr
-
-def acc_metric(similarity, classes):
-    max_similarity = similarity.argmax(dim=1)
-    correct = max_similarity.eq(classes)
-    acc = correct.sum() / torch.FloatTensor([classes.shape[0]])
-    return acc
 
 def make_mask(sequence, pad_idx):
     mask = (sequence != pad_idx).permute(1, 0)
