@@ -17,7 +17,6 @@ import utils
 parser = argparse.ArgumentParser()
 parser.add_argument('--lang', type=str, required=True)
 parser.add_argument('--model', type=str, required=True)
-parser.add_argument('--seed', type=int, default=None)
 parser.add_argument('--code_max_length', type=int, default=200)
 parser.add_argument('--desc_max_length', type=int, default=30)
 parser.add_argument('--vocab_max_size', type=int, default=10_000)
@@ -37,6 +36,7 @@ parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--n_epochs', type=int, default=500)
 parser.add_argument('--patience', type=int, default=5)
 parser.add_argument('--grad_clip', type=float, default=1.0)
+parser.add_argument('--seed', type=int, default=None)
 parser.add_argument('--save_model', action='store_true')
 args = parser.parse_args()
 
@@ -51,7 +51,7 @@ args = utils.handle_args(args)
 
 run_name = utils.get_run_name(args)
 
-run_path = os.path.join('runs/', run_name)
+run_path = os.path.join('runs/', *run_name)
 
 assert not os.path.exists(run_path)
 

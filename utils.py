@@ -4,7 +4,7 @@ import torch.nn.init as init
 import torch.nn.functional as F
 
 def get_run_name(args):
-    return '-'.join([f'{param}={val}' for param, val in vars(args).items()])
+    return [f'{param}={val}' for param, val in vars(args).items()]
 
 def count_parameters(models):
     if isinstance(models, list):

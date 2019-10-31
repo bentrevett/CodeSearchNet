@@ -108,12 +108,15 @@ class RNNEncoder(nn.Module):
                               num_layers = n_layers, 
                               bidirectional = bidirectional,
                               dropout = 0 if n_layers < 2 else dropout)
-        else:
+
+        elif rnn_type == 'lstm':
             self.rnn = nn.LSTM(emb_dim,
                                hid_dim, 
                                num_layers = n_layers, 
                                bidirectional = bidirectional,
                                dropout = 0 if n_layers < 2 else dropout)
+        else:
+            raise ValueError(f'Unknown RNN type: {rnn_type}')
 
         self.dropout = nn.Dropout(dropout)
 
@@ -127,6 +130,8 @@ class RNNEncoder(nn.Module):
         #embedded = [seq len, batch size, emb dim]
 
         outputs, hidden = self.rnn(embedded)
+
+        outputs = self.dropout(outputs)
 
         #outputs = [seq len, batch size, hid dim * 2 if bidirectional else hid dim]
         #if rnn is gru:
