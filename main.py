@@ -344,7 +344,7 @@ def evaluate(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, cri
 
     return epoch_loss / len(iterator), epoch_mrr / len(iterator)
 
-best_valid_mrr = float('inf')
+best_valid_mrr = 0
 patience_counter = 0
 
 for epoch in range(args.n_epochs):
@@ -364,7 +364,7 @@ for epoch in range(args.n_epochs):
                                      valid_iterator,
                                      criterion)
 
-    if valid_mrr < best_valid_mrr:
+    if valid_mrr > best_valid_mrr:
         best_valid_mrr = valid_mrr
         patience_counter = 0
         if args.save_model:
@@ -372,7 +372,6 @@ for epoch in range(args.n_epochs):
             torch.save(desc_encoder.state_dict(), os.path.join(run_path, 'desc_encoder.pt'))
             torch.save(code_pooler.state_dict(), os.path.join(run_path, 'code_pooler.pt'))
             torch.save(desc_pooler.state_dict(), os.path.join(run_path, 'desc_pooler.pt'))
-        
     else:
         patience_counter += 1
 
