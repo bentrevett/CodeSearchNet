@@ -293,9 +293,6 @@ def train(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, optimi
         encoded_desc = desc_encoder(desc)
         encoded_desc = desc_pooler(encoded_desc, desc_mask)
 
-        #encoded_code = code_pooler(code_encoder(code), code_mask)
-        #encoded_desc = desc_pooler(desc_encoder(desc), desc_mask)
-
         #encoded_code/desc = [batch size, emb dim/hid dim/hid dim * 2 (bow/rnn/bi-rnn)]
 
         loss, mrr = criterion(encoded_code, encoded_desc)
@@ -339,9 +336,6 @@ def evaluate(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, cri
 
             encoded_desc = desc_encoder(desc)
             encoded_desc = desc_pooler(encoded_desc, desc_mask)
-
-            #encoded_code = code_pooler(code_encoder(code), code_mask)
-            #encoded_desc = desc_pooler(desc_encoder(desc), desc_mask)
 
             loss, mrr = criterion(encoded_code, encoded_desc)
 
@@ -387,7 +381,7 @@ for epoch in range(args.n_epochs):
     print(f'\t Val. Loss: {valid_loss:.3f}, Valid MRR: {valid_mrr:.3f}')
 
     with open(results_path, 'a') as f:
-        f.write(f'{train_loss}\t{train_mrr}\t{valid_loss}\t{valid_mrr}n')
+        f.write(f'{train_loss}\t{train_mrr}\t{valid_loss}\t{valid_mrr}\n')
 
     if patience_counter >= args.patience:
         print('Ended early due to losing patience!')
