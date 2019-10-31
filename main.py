@@ -36,7 +36,7 @@ parser.add_argument('--loss', type=str, default='softmax')
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--n_epochs', type=int, default=500)
 parser.add_argument('--patience', type=int, default=5)
-parser.add_argument('--grad_clip', type=float, default=1)
+parser.add_argument('--grad_clip', type=float, default=1.0)
 parser.add_argument('--save_model', action='store_true')
 args = parser.parse_args()
 
