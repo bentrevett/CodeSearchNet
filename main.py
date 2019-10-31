@@ -1,5 +1,4 @@
 import torch
-import torch.nn.init as init
 import torch.optim as optim
 
 from torchtext import data
@@ -8,20 +7,22 @@ import numpy as np
 from tqdm import tqdm
 
 import argparse
+import os
 import random
-import argparse
 
+import bpe
 import models
 import utils
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lang', type=str, required=True)
 parser.add_argument('--model', type=str, required=True)
+parser.add_argument('--seed', type=int, default=None)
 parser.add_argument('--code_max_length', type=int, default=200)
 parser.add_argument('--desc_max_length', type=int, default=30)
-parser.add_argument('--seed', type=int, default=None)
 parser.add_argument('--vocab_max_size', type=int, default=10_000)
 parser.add_argument('--vocab_min_freq', type=int, default=10)
+parser.add_argument('--bpe_pct', type=float, default=0.5)
 parser.add_argument('--batch_size', type=int, default=1000)
 parser.add_argument('--emb_dim', type=int, default=128)
 parser.add_argument('--hid_dim', type=int, default=64)
@@ -29,24 +30,43 @@ parser.add_argument('--n_layers', type=int, default=2)
 parser.add_argument('--bidirectional', action='store_true')
 parser.add_argument('--filter_size', type=int, default=16)
 parser.add_argument('--n_heads', type=int, default=8)
-parser.add_argument('--dropout', type=float, default=0.25)
+parser.add_argument('--dropout', type=float, default=0.1)
 parser.add_argument('--pool_mode', type=str, default='weighted_mean')
 parser.add_argument('--loss', type=str, default='softmax')
 parser.add_argument('--lr', type=float, default=0.01)
-parser.add_argument('--n_epochs', type=int, default=25)
+parser.add_argument('--n_epochs', type=int, default=500)
+parser.add_argument('--patience', type=int, default=5)
 parser.add_argument('--grad_clip', type=float, default=1)
 args = parser.parse_args()
+
+assert args.model in ['bow', 'lstm', 'gru', 'cnn', 'transformer']
+assert args.pool_mode in ['mean', 'max', 'weighted_mean']
+assert args.loss in ['softmax', 'cosine']
 
 if args.seed == None:
     args.seed = random.randint(0, 999)
 
 args = utils.handle_args(args)
 
-print(vars(args))
+run_name = utils.get_run_name(args)
 
-assert args.model in ['bow', 'lstm', 'gru', 'cnn', 'transformer']
-assert args.pool_mode in ['mean', 'max', 'weighted_mean']
-assert args.loss in ['softmax', 'cosine']
+run_path = os.path.join('runs/', run_name)
+
+assert not os.path.exists(run_path)
+
+os.makedirs(run_path)
+
+params_path = os.path.join(run_path, 'params.txt')
+results_path = os.path.join(run_path, 'results.txt')
+
+with open(params_path, 'w+') as f:
+    for param, val in vars(args).items():
+        f.write(f'{param}\t{val}\n')
+
+with open(results_path, 'w+') as f:
+    f.write('train_loss\ttrain_mrr\ttrain_acc\tvalid_loss\tvalid_mrr\tvalid_acc\n')
+
+print(vars(args))
 
 random.seed(args.seed)
 np.random.seed(args.seed)
@@ -58,32 +78,51 @@ def cut_code_max_length(tokens):
 def cut_desc_max_length(tokens):
     return tokens[:args.desc_max_length]
 
-CODE = data.Field(preprocessing = cut_code_max_length, include_lengths = True)
-DESC = data.Field(preprocessing = cut_desc_max_length, include_lengths = True)
+if args.bpe_pct <= 0:
 
-fields = {'code_tokens': ('code', CODE), 'docstring_tokens': ('desc', DESC)}
+    CODE = data.Field(preprocessing = cut_code_max_length, include_lengths = True)
+    DESC = data.Field(preprocessing = cut_desc_max_length, include_lengths = True)
 
-train_data, valid_data, test_data = data.TabularDataset.splits(
-                                        path = f'data/{args.lang}/final/jsonl',
-                                        train = f'train/{args.lang}_train.jsonl',
-                                        validation = f'valid/{args.lang}_valid.jsonl',
-                                        test = f'test/{args.lang}_test.jsonl',
-                                        format = 'json',
-                                        fields = fields)
+    fields = {'code_tokens': ('code', CODE), 'docstring_tokens': ('desc', DESC)}
+
+    train_data, valid_data, test_data = data.TabularDataset.splits(
+                                            path = f'data/{args.lang}/final/jsonl',
+                                            train = f'train/{args.lang}_train.jsonl',
+                                            validation = f'valid/{args.lang}_valid.jsonl',
+                                            test = f'test/{args.lang}_test.jsonl',
+                                            format = 'json',
+                                            fields = fields)
+
+    CODE.build_vocab(train_data,
+                     max_size = args.vocab_max_size,
+                     min_freq = args.vocab_min_freq)
+
+    DESC.build_vocab(train_data,
+                     max_size = args.vocab_max_size,
+                     min_freq = args.vocab_min_freq)
+
+else:
+
+    CODE = data.Field(preprocessing = cut_code_max_length, include_lengths = True)
+    DESC = data.Field(preprocessing = cut_desc_max_length, include_lengths = True)
+
+    fields = {'code_tokens': ('code', CODE), 'docstring_tokens': ('desc', DESC)}
+
+    train_data, valid_data, test_data = data.TabularDataset.splits(
+                                            path = f'data/{args.lang}/final/jsonl',
+                                            train = f'train/{args.lang}_train_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl',
+                                            validation = f'valid/{args.lang}_valid_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl',
+                                            test = f'test/{args.lang}_test_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl',
+                                            format = 'json',
+                                            fields = fields)
+
+    CODE.build_vocab(train_data)
+
+    DESC.build_vocab(train_data)
 
 print(f'{len(train_data):,} training examples')
 print(f'{len(valid_data):,} valid examples')
 print(f'{len(test_data):,} test examples')
-
-print(f'Example: {vars(train_data[0])}')
-
-CODE.build_vocab(train_data,
-                 max_size = args.vocab_max_size,
-                 min_freq = args.vocab_min_freq)
-
-DESC.build_vocab(train_data,
-                 max_size = args.vocab_max_size,
-                 min_freq = args.vocab_min_freq)
 
 print(f'Code vocab size: {len(CODE.vocab):,}')
 print(f'Description vocab size: {len(DESC.vocab):,}')
@@ -315,6 +354,7 @@ def evaluate(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, cri
     return epoch_loss / len(iterator), epoch_mrr / len(iterator), epoch_acc / len(iterator)
 
 best_valid_loss = float('inf')
+patience_counter = 0
 
 for epoch in range(args.n_epochs):
 
@@ -335,11 +375,23 @@ for epoch in range(args.n_epochs):
 
     if valid_loss < best_valid_loss:
         best_valid_loss = valid_loss
-        torch.save(code_encoder.state_dict(), 'code_encoder.pt')
-        torch.save(desc_encoder.state_dict(), 'desc_encoder.pt')
-        torch.save(code_pooler.state_dict(), 'code_pooler.pt')
-        torch.save(desc_pooler.state_dict(), 'desc_pooler.pt')
+        torch.save(code_encoder.state_dict(), os.path.join(run_path, 'code_encoder.pt'))
+        torch.save(desc_encoder.state_dict(), os.path.join(run_path, 'desc_encoder.pt'))
+        torch.save(code_pooler.state_dict(), os.path.join(run_path, 'code_pooler.pt'))
+        torch.save(desc_pooler.state_dict(), os.path.join(run_path, 'desc_pooler.pt'))
+        patience_counter = 0
+    else:
+        patience_counter += 1
 
     print(f'Epoch: {epoch+1:02}')
     print(f'\tTrain Loss: {train_loss:.3f}, Train MRR: {train_mrr:.3f}, Train Acc: {train_acc:.3f}')
     print(f'\t Val. Loss: {valid_loss:.3f}, Valid MRR: {valid_mrr:.3f}, Valid Acc: {valid_acc:.3f}')
+
+    with open(results_path, 'a') as f:
+        f.write(f'{train_loss}\t{train_mrr}\t{train_acc}\t{valid_loss}\t{valid_mrr}\t{valid_acc}\n')
+
+    if patience_counter >= args.patience:
+        print('Ended early due to losing patience!')
+        with open(results_path, 'a') as f:
+            f.write(f'lost_patience')
+        break

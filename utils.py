@@ -3,6 +3,9 @@ import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
 
+def get_run_name(args):
+    return '-'.join([f'{param}={val}' for param, val in vars(args).items()])
+
 def count_parameters(models):
     if isinstance(models, list):
         return sum([count_parameters(model) for model in models])
@@ -82,23 +85,16 @@ class CosineLoss(nn.Module):
         return loss, mrr, acc
 
 def mrr_metric(similarity):
-
     correct_scores = torch.diagonal(similarity)
-
     compared_scores = similarity >= correct_scores.unsqueeze(-1)
-
     rr = 1 / compared_scores.float().sum(-1)
-
     mrr = rr.mean()
-
     return mrr
 
 def acc_metric(similarity, classes):
-
     max_similarity = similarity.argmax(dim=1)
     correct = max_similarity.eq(classes)
     acc = correct.sum() / torch.FloatTensor([classes.shape[0]])
-
     return acc
 
 def make_mask(sequence, pad_idx):
@@ -147,6 +143,9 @@ def handle_args(args):
 
     else:
         raise ValueError(f'Model {args.model} not valid!')
+
+    if args.bpe_pct > 0:
+        del args.vocab_min_freq
 
     return args
 
