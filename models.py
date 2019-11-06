@@ -280,7 +280,8 @@ class TransformerEncoderLayer(nn.Module):
                  dropout):
         super().__init__()
         
-        self.layer_norm = nn.LayerNorm(emb_dim)
+        self.layer_norm_1 = nn.LayerNorm(emb_dim)
+        self.layer_norm_2 = nn.LayerNorm(emb_dim)
         self.self_attn = MultiHeadAttention(emb_dim, n_heads, dropout)
         self.fc_1 = nn.Linear(emb_dim, hid_dim)
         self.fc_2 = nn.Linear(hid_dim, emb_dim)
@@ -292,11 +293,11 @@ class TransformerEncoderLayer(nn.Module):
 
         #embedded = [batch size, seq len, emb dim]
 
-        embedded = self.layer_norm(embedded + self.dropout(self.self_attn(embedded, embedded, embedded, mask)))
+        embedded = self.layer_norm_1(embedded + self.dropout(self.self_attn(embedded, embedded, embedded, mask)))
 
         #embedded = [batch size, seq len, emb dim]
 
-        embedded = self.layer_norm(embedded + self.dropout(self.fc_2(self.dropout(F.gelu(self.fc_1(embedded))))))
+        embedded = self.layer_norm_2(embedded + self.dropout(self.fc_2(self.dropout(F.gelu(self.fc_1(embedded))))))
 
         #embedded = [batch size, seq len, emb dim]
 

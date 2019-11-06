@@ -1,5 +1,7 @@
 import torch
 import torch.optim as optim
+import torch.nn as nn
+import torch.nn.init as init
 
 from torchtext import data
 
@@ -230,10 +232,31 @@ elif args.model == 'transformer':
 else:
     raise ValueError(f'Model {args.model} not valid!')
 
-code_encoder.apply(utils.initialize_parameters)
-desc_encoder.apply(utils.initialize_parameters)
-code_pooler.apply(utils.initialize_parameters)
-desc_pooler.apply(utils.initialize_parameters)
+if args.model == 'transformer':
+
+    def truncated_normal_(tensor, mean=0, std=1):
+        size = tensor.shape
+        tmp = tensor.new_empty(size + (4,)).normal_()
+        valid = (tmp < 2) & (tmp > -2)
+        ind = valid.max(-1, keepdim=True)[1]
+        tensor.data.copy_(tmp.gather(-1, ind).squeeze(-1))
+        tensor.data.mul_(std).add_(mean)
+
+    def initialize_parameters(m):
+        if isinstance(m, nn.LayerNorm):
+            pass
+        elif hasattr(m, 'weight'):
+            truncated_normal_(m.weight.data, std=0.02)
+
+    code_encoder.apply(initialize_parameters)
+    desc_encoder.apply(initialize_parameters)
+    code_pooler.apply(initialize_parameters)
+    desc_pooler.apply(initialize_parameters)
+else:
+    code_encoder.apply(utils.initialize_parameters)
+    desc_encoder.apply(utils.initialize_parameters)
+    code_pooler.apply(utils.initialize_parameters)
+    desc_pooler.apply(utils.initialize_parameters)
 
 code_encoder = code_encoder.to(device)
 desc_encoder = desc_encoder.to(device)
