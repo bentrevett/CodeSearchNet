@@ -11,7 +11,7 @@ def load_vocab(path, max_size, pad_token, unk_token):
     with open(path, 'r') as f:
         for i, tok in enumerate(f):
             tok = tok.split('\t')[0]
-            if i > max_size:
+            if i >= max_size:
                 return vocab
             if tok not in vocab:
                 vocab[tok.strip()] = len(vocab)
