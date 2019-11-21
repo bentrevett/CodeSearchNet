@@ -6,6 +6,21 @@ import torch.nn.functional as F
 def get_run_name(args):
     return [f'{param}={val}' for param, val in vars(args).items()]
 
+def load_vocab(path, max_size, pad_token, unk_token):
+    vocab = {pad_token: 0 , unk_token: 1}
+    with open(path, 'r') as f:
+        for i, tok in enumerate(f):
+            tok = tok.split('\t')[0]
+            if i > max_size:
+                return vocab
+            if tok not in vocab:
+                vocab[tok.strip()] = len(vocab)
+    return vocab
+
+def numericalize(vocab, unk_token, max_length, tokens):
+    idxs = [vocab.get(t, vocab[unk_token]) for t in tokens[:max_length]]
+    return idxs
+
 def count_parameters(models):
     if isinstance(models, list):
         return sum([count_parameters(model) for model in models])

@@ -220,6 +220,12 @@ class BpeVocabulary(typing.Sized):
 
             yield ' '.join(w for w in words if w != '')
 
+def file_iterator(path):
+    with open(path, 'r') as f:
+        for line in f:
+            example = json.loads(line)
+            yield example
+
 if __name__ == '__main__':
 
     import collections
@@ -228,87 +234,55 @@ if __name__ == '__main__':
     import os
 
     parser = argparse.ArgumentParser()
+    parser.add_argument('--lang', type=str, required = True)
     parser.add_argument('--vocab_max_size', type=int, required = True)
     parser.add_argument('--bpe_pct', type=float, required = True)
     args = parser.parse_args()
 
-    langs = ['java', 'python', 'ruby', 'php', 'go', 'javascript']
+    print(f'BPE on {args.lang}')
 
-    for lang in langs:
+    code_vocab_counter = collections.Counter()
+    desc_vocab_counter = collections.Counter()
 
-        print(f'BPE on {lang}')
+    print('Building vocab counter on train set...')
 
-        code_vocab_counter = collections.Counter()
-        desc_vocab_counter = collections.Counter()
+    with open(f'data/{args.lang}/final/jsonl/train/{args.lang}_train.jsonl', 'r') as f:
+        for line in f:
+            example = json.loads(line)
+            code = example['code_tokens']
+            desc = example['docstring_tokens']
+            code_vocab_counter.update(code)
+            desc_vocab_counter.update(desc)
 
-        print('Building vocab counter on train set...')
+    code_bpe_vocab = BpeVocabulary(vocab_size = args.vocab_max_size,
+                                        pct_bpe = args.bpe_pct)
 
-        with open(f'data/{lang}/final/jsonl/train/{lang}_train.jsonl', 'r') as f:
-            for line in f:
-                example = json.loads(line)
-                code = example['code_tokens']
-                desc = example['docstring_tokens']
-                code_vocab_counter.update(code)
-                desc_vocab_counter.update(desc)
+    desc_bpe_vocab = BpeVocabulary(vocab_size = args.vocab_max_size,
+                                        pct_bpe = args.bpe_pct)
 
-        code_bpe_vocab = BpeVocabulary(vocab_size = args.vocab_max_size,
-                                           pct_bpe = args.bpe_pct)
+    print('Fitting BPE...')
 
-        desc_bpe_vocab = BpeVocabulary(vocab_size = args.vocab_max_size,
-                                           pct_bpe = args.bpe_pct)
+    code_bpe_vocab.fit(code_vocab_counter)
+    desc_bpe_vocab.fit(desc_vocab_counter)
 
-        print('Fitting BPE...')
+    for t in ['train', 'test', 'valid']:
 
-        code_bpe_vocab.fit(code_vocab_counter)
-        desc_bpe_vocab.fit(desc_vocab_counter)
+        print(f'Tokenizing and writing {t} data...')
 
-        if os.path.exists(f'data/{lang}/final/jsonl/train/{lang}_train_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl'):
-            os.remove(f'data/{lang}/final/jsonl/train/{lang}_train_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl')
+        if os.path.exists(f'data/{args.lang}/final/jsonl/{t}/{args.lang}_{t}_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl'):
+            os.remove(f'data/{args.lang}/final/jsonl/{t}/{args.lang}_{t}_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl')
 
-        if os.path.exists(f'data/{lang}/final/jsonl/test/{lang}_test_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl'):
-            os.remove(f'data/{lang}/final/jsonl/test/{lang}_test_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl')
+        iterator = file_iterator(f'data/{args.lang}/final/jsonl/{t}/{args.lang}_{t}.jsonl')
 
-        if os.path.exists(f'data/{lang}/final/jsonl/valid/{lang}_valid_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl'):
-            os.remove(f'data/{lang}/final/jsonl/valid/{lang}_valid_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl')
+        with open(f'data/{args.lang}/final/jsonl/{t}/{args.lang}_{t}_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl', 'w+') as f:
 
-        print('Tokenizing and writing train data...')
+            for example in tqdm(iterator):
 
-        with open(f'data/{lang}/final/jsonl/train/{lang}_train.jsonl', 'r') as f:
-            for line in f:
-                example = json.loads(line)
                 code = example['code_tokens']
                 desc = example['docstring_tokens']
                 bpe_code = code_bpe_vocab.tokenize(code)
                 bpe_desc = desc_bpe_vocab.tokenize(desc)
                 example = {'code_tokens': bpe_code, 'docstring_tokens': bpe_desc}
-                with open(f'data/{lang}/final/jsonl/train/{lang}_train_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl', 'a+') as g:
-                    json.dump(example, g)
-                    g.write('\n')
 
-        print('Tokenizing and writing test data...')
-
-        with open(f'data/{lang}/final/jsonl/test/{lang}_test.jsonl', 'r') as f:
-            for line in f:
-                example = json.loads(line)
-                code = example['code_tokens']
-                desc = example['docstring_tokens']
-                bpe_code = code_bpe_vocab.tokenize(code)
-                bpe_desc = desc_bpe_vocab.tokenize(desc)
-                example = {'code_tokens': bpe_code, 'docstring_tokens': bpe_desc}
-                with open(f'data/{lang}/final/jsonl/test/{lang}_test_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl', 'a+') as g:
-                    json.dump(example, g)
-                    g.write('\n')
-
-        print('Tokenizing and writing valid data...')
-
-        with open(f'data/{lang}/final/jsonl/valid/{lang}_valid.jsonl', 'r') as f:
-            for line in f:
-                example = json.loads(line)
-                code = example['code_tokens']
-                desc = example['docstring_tokens']
-                bpe_code = code_bpe_vocab.tokenize(code)
-                bpe_desc = desc_bpe_vocab.tokenize(desc)
-                example = {'code_tokens': bpe_code, 'docstring_tokens': bpe_desc}
-                with open(f'data/{lang}/final/jsonl/valid/{lang}_valid_bpe_{args.vocab_max_size}_{args.bpe_pct}.jsonl', 'a+') as g:
-                    json.dump(example, g)
-                    g.write('\n')
+                json.dump(example, f)
+                g.write('\n')

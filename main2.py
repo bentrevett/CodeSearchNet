@@ -11,10 +11,14 @@ from tqdm import tqdm
 import argparse
 import os
 import random
+import functools
 
 import bpe
 import models
 import utils
+
+UNK_TOKEN = '<unk>'
+PAD_TOKEN = '<pad>'
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lang', type=str, required=True)
@@ -75,12 +79,6 @@ random.seed(args.seed)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 
-def cut_code_max_length(tokens):
-    return tokens[:args.code_max_length]
-
-def cut_desc_max_length(tokens):
-    return tokens[:args.desc_max_length]
-
 if args.lang.startswith('6L-'):
     train_lang = '6L'
     valid_lang = args.lang.split('-')[-1]
@@ -91,11 +89,44 @@ else:
     test_lang = args.lang
 
 if args.bpe_pct <= 0:
+    code_vocab = utils.load_vocab(f'data/{train_lang}/final/jsonl/train/{train_lang}_train.code_vocab',
+                                  args.vocab_max_size,
+                                  PAD_TOKEN,
+                                  UNK_TOKEN)
 
-    CODE = data.Field(preprocessing = cut_code_max_length, include_lengths = True)
-    DESC = data.Field(preprocessing = cut_desc_max_length, include_lengths = True)
+    desc_vocab = utils.load_vocab(f'data/{train_lang}/final/jsonl/train/{train_lang}_train.desc_vocab',
+                                  args.vocab_max_size,
+                                  PAD_TOKEN,
+                                  UNK_TOKEN)
+else:
+    code_vocab = utils.load_vocab(f'data/{train_lang}/final/jsonl/train/{train_lang}_train_bpe_{args.vocab_max_size}_{args.bpe_pct}.code_vocab',
+                                  args.vocab_max_size,
+                                  PAD_TOKEN,
+                                  UNK_TOKEN)
 
-    fields = {'code_tokens': ('code', CODE), 'docstring_tokens': ('desc', DESC)}
+    desc_vocab = utils.load_vocab(f'data/{train_lang}/final/jsonl/train/{train_lang}_train_bpe_{args.vocab_max_size}_{args.bpe_pct}.desc_vocab',
+                                  args.vocab_max_size,
+                                  PAD_TOKEN,
+                                  UNK_TOKEN)
+
+code_numericalizer = functools.partial(utils.numericalize, code_vocab, UNK_TOKEN, args.code_max_length)
+desc_numericalizer = functools.partial(utils.numericalize, desc_vocab, UNK_TOKEN, args.desc_max_length)
+
+CODE = data.Field(use_vocab = False,
+                preprocessing = code_numericalizer,
+                pad_token = code_vocab[PAD_TOKEN],
+                unk_token = code_vocab[UNK_TOKEN],
+                include_lengths = True)
+
+DESC = data.Field(use_vocab = False,
+                preprocessing = desc_numericalizer,
+                pad_token = desc_vocab[PAD_TOKEN],
+                unk_token = desc_vocab[UNK_TOKEN],
+                include_lengths = True)
+
+fields = {'code_tokens': ('code', CODE), 'docstring_tokens': ('desc', DESC)}
+
+if args.bpe_pct <= 0:
 
     train_data, valid_data, test_data = data.TabularDataset.splits(
                                             path = f'data',
@@ -105,20 +136,7 @@ if args.bpe_pct <= 0:
                                             format = 'json',
                                             fields = fields)
 
-    CODE.build_vocab(train_data,
-                     max_size = args.vocab_max_size,
-                     min_freq = args.vocab_min_freq)
-
-    DESC.build_vocab(train_data,
-                     max_size = args.vocab_max_size,
-                     min_freq = args.vocab_min_freq)
-
 else:
-
-    CODE = data.Field(preprocessing = cut_code_max_length, include_lengths = True)
-    DESC = data.Field(preprocessing = cut_desc_max_length, include_lengths = True)
-
-    fields = {'code_tokens': ('code', CODE), 'docstring_tokens': ('desc', DESC)}
 
     train_data, valid_data, test_data = data.TabularDataset.splits(
                                             path = f'data',
@@ -128,16 +146,12 @@ else:
                                             format = 'json',
                                             fields = fields)
 
-    CODE.build_vocab(train_data)
-
-    DESC.build_vocab(train_data)
-
 print(f'{len(train_data):,} training examples')
 print(f'{len(valid_data):,} valid examples')
 print(f'{len(test_data):,} test examples')
 
-print(f'Code vocab size: {len(CODE.vocab):,}')
-print(f'Description vocab size: {len(DESC.vocab):,}')
+print(f'Code vocab size: {len(code_vocab):,}')
+print(f'Description vocab size: {len(desc_vocab):,}')
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -149,11 +163,11 @@ train_iterator, valid_iterator, test_iterator = data.BucketIterator.splits(
 
 if args.model == 'bow':
 
-    code_encoder = models.BagOfWordsEncoder(len(CODE.vocab),
+    code_encoder = models.BagOfWordsEncoder(len(code_vocab),
                                             args.emb_dim,
                                             args.dropout)
 
-    desc_encoder = models.BagOfWordsEncoder(len(DESC.vocab),
+    desc_encoder = models.BagOfWordsEncoder(len(desc_vocab),
                                             args.emb_dim,
                                             args.dropout)
 
@@ -165,7 +179,7 @@ if args.model == 'bow':
 
 elif args.model in ['gru', 'lstm']:
 
-    code_encoder = models.RNNEncoder(len(CODE.vocab),
+    code_encoder = models.RNNEncoder(len(code_vocab),
                                      args.emb_dim,
                                      args.hid_dim,
                                      args.n_layers,
@@ -173,7 +187,7 @@ elif args.model in ['gru', 'lstm']:
                                      args.dropout,
                                      args.model)
 
-    desc_encoder = models.RNNEncoder(len(DESC.vocab),
+    desc_encoder = models.RNNEncoder(len(desc_vocab),
                                      args.emb_dim,
                                      args.hid_dim,
                                      args.n_layers,
@@ -189,14 +203,14 @@ elif args.model in ['gru', 'lstm']:
 
 elif args.model == 'cnn':
 
-    code_encoder = models.CNNEncoder(len(CODE.vocab),
+    code_encoder = models.CNNEncoder(len(code_vocab),
                                      args.emb_dim,
                                      args.filter_size,
                                      args.n_layers,
                                      args.dropout,
                                      device)
 
-    desc_encoder = models.CNNEncoder(len(DESC.vocab),
+    desc_encoder = models.CNNEncoder(len(desc_vocab),
                                      args.emb_dim,
                                      args.filter_size,
                                      args.n_layers,
@@ -211,10 +225,10 @@ elif args.model == 'cnn':
 
 elif args.model == 'transformer':
 
-    code_pad_idx = CODE.vocab.stoi[CODE.pad_token]
-    desc_pad_idx = DESC.vocab.stoi[DESC.pad_token]
+    code_pad_idx = code_vocab[PAD_TOKEN]
+    desc_pad_idx = desc_vocab[PAD_TOKEN]
 
-    code_encoder = models.TransformerEncoder(len(CODE.vocab),
+    code_encoder = models.TransformerEncoder(len(code_vocab),
                                              args.emb_dim,
                                              args.hid_dim,
                                              args.n_layers,
@@ -223,7 +237,7 @@ elif args.model == 'transformer':
                                              code_pad_idx,
                                              device)
 
-    desc_encoder = models.TransformerEncoder(len(DESC.vocab),
+    desc_encoder = models.TransformerEncoder(len(desc_vocab),
                                              args.emb_dim,
                                              args.hid_dim,
                                              args.n_layers,
@@ -314,8 +328,8 @@ def train(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, optimi
 
         #code/desc = [seq len, batch size]
 
-        code_mask = utils.make_mask(code, CODE.vocab.stoi[CODE.pad_token])
-        desc_mask = utils.make_mask(desc, DESC.vocab.stoi[DESC.pad_token])
+        code_mask = utils.make_mask(code, code_vocab[PAD_TOKEN])
+        desc_mask = utils.make_mask(desc, desc_vocab[PAD_TOKEN])
 
         #mask = [batch size, seq len]
 
@@ -360,8 +374,8 @@ def evaluate(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, cri
             code, code_lengths = batch.code
             desc, desc_lengths = batch.desc
 
-            code_mask = utils.make_mask(code, CODE.vocab.stoi[CODE.pad_token])
-            desc_mask = utils.make_mask(desc, DESC.vocab.stoi[DESC.pad_token])
+            code_mask = utils.make_mask(code, code_vocab[PAD_TOKEN])
+            desc_mask = utils.make_mask(desc, desc_vocab[PAD_TOKEN])
 
             encoded_code = code_encoder(code)
             encoded_code = code_pooler(encoded_code, code_mask)
