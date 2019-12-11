@@ -285,4 +285,4 @@ if __name__ == '__main__':
                 example = {'code_tokens': bpe_code, 'docstring_tokens': bpe_desc}
 
                 json.dump(example, f)
-                g.write('\n')
+                f.write('\n')

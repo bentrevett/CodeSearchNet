@@ -1,6 +1,41 @@
 import torch
 import torch.nn as nn
+import torch.nn.init as init
 import torch.nn.functional as F
+
+class LanguageModel(nn.Module):
+    def __init__(self,
+                 model,
+                 embedding_dim,
+                 vocab_size):
+        super().__init__()
+
+        self.model = model
+        self.fc_out = nn.Linear(embedding_dim, vocab_size)
+
+        init.xavier_uniform_(self.fc_out.weight.data)
+        self.fc_out.bias.data.fill_(0)
+
+    def forward(self, tokens, mask=None):
+
+        #tokens = [seq len, batch size]
+
+        if mask is None:
+            embedded = self.model(tokens)
+        else:
+            embedded = self.model(tokens, mask)
+
+        #embedded = [batch size, embedding dim, seq len]
+
+        embedded = embedded.permute(0, 2, 1)
+
+        #embedded = [batch size, seq len, embedding dim]
+
+        predictions = self.fc_out(embedded)
+
+        #predictions = [batch size, seq len, vocab size]
+
+        return predictions
 
 class EmbeddingPooler(nn.Module):
     def __init__(self,
@@ -228,14 +263,15 @@ class TransformerEncoder(nn.Module):
 
         self.layers = nn.ModuleList([TransformerEncoderLayer(emb_dim, hid_dim, n_heads, dropout) for _ in range(n_layers)])
 
-        self.layer_norm = nn.LayerNorm(emb_dim)
+        self.layer_norm = nn.LayerNorm(emb_dim, 1e-3)
         self.dropout = nn.Dropout(dropout)
 
         self.pad_idx = pad_idx
         self.device = device
 
     def forward(self,
-                tokens
+                tokens,
+                mask = None
                 ):
 
         #tokens = [seq len, batch size]
@@ -244,7 +280,8 @@ class TransformerEncoder(nn.Module):
 
         #tokens = [batch size, seq len]
 
-        mask = (tokens != self.pad_idx).unsqueeze(1).unsqueeze(2)
+        if mask is None:
+            mask = (tokens != self.pad_idx).unsqueeze(1).unsqueeze(2)
 
         #mask = [batch size, 1, 1, seq len]
 
@@ -280,8 +317,8 @@ class TransformerEncoderLayer(nn.Module):
                  dropout):
         super().__init__()
         
-        self.layer_norm_1 = nn.LayerNorm(emb_dim)
-        self.layer_norm_2 = nn.LayerNorm(emb_dim)
+        self.layer_norm_1 = nn.LayerNorm(emb_dim, eps=1e-3)
+        self.layer_norm_2 = nn.LayerNorm(emb_dim, eps=1e-3)
         self.self_attn = MultiHeadAttention(emb_dim, n_heads, dropout)
         self.fc_1 = nn.Linear(emb_dim, hid_dim)
         self.fc_2 = nn.Linear(hid_dim, emb_dim)

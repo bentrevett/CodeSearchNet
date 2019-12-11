@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
 
+import json
+
 def get_run_name(args):
     return [f'{param}={val}' for param, val in vars(args).items()]
 
@@ -27,6 +29,27 @@ def count_parameters(models):
     else:
         return sum(p.numel() for p in models.parameters() if p.requires_grad)
 
+def load_lm_data(path, tokenizer, data):
+    if data == 'desc':
+        data = 'docstring'
+    all_tokens = []
+    with open(path, 'r') as f:
+        for line in f:
+            tokens = json.loads(line)
+            tokens = tokens[f'{data}_tokens']
+            tokens = tokenizer(tokens)
+            all_tokens += tokens
+    return torch.LongTensor(all_tokens)
+
+def batchify(data, batch_size):
+    # Work out how cleanly we can divide the dataset into bsz parts.
+    n_batches = data.size(0) // batch_size
+    # Trim off any extra elements that wouldn't cleanly fit (remainders).
+    data = data.narrow(0, 0, n_batches * batch_size)
+    # Evenly divide the data across the bsz batches.
+    data = data.view(batch_size, -1).t().contiguous()
+    return data
+
 class SoftmaxLoss(nn.Module):
     def __init__(self,
                  device):
@@ -50,43 +73,6 @@ class SoftmaxLoss(nn.Module):
         classes = torch.arange(similarity.shape[0]).to(self.device)
 
         loss = F.cross_entropy(similarity, classes)
-
-        with torch.no_grad():
-            mrr = mrr_metric(similarity)
-
-        return loss, mrr
-
-class CosineLoss(nn.Module):
-    def __init__(self,
-                 device):
-        super().__init__()
-
-        raise NotImplementedError('CosineLoss does not work (yet)')
-
-        self.device = device
-
-    def forward(self, enc_code, enc_desc):
-
-        raise NotImplementedError('CosineLoss does not work (yet)')
-
-        #enc_code = [batch size, enc dim]
-        #enc_desc = [batch size, enc dim]
-
-        enc_code_norm = torch.norm(enc_code, p=2, dim=-1, keepdim=True) + 1e-10
-        enc_desc_norm = torch.norm(enc_desc, p=2, dim=-1, keepdim=True) + 1e-10
-
-        enc_code = enc_code / enc_code_norm
-        enc_desc = enc_desc / enc_desc_norm
-
-        similarity = torch.matmul(enc_code, enc_desc.permute(1, 0))
-
-        classes = torch.arange(similarity.shape[0]).to(self.device)
-
-        negative_matrix = torch.diag(torch.zeros(similarity.shape[0]).fill_(-float('inf'))).to(self.device)
-
-        per_sample_loss = 1 - torch.diagonal(similarity) + torch.max(F.relu(similarity + negative_matrix), dim=-1)[0]
-
-        loss = per_sample_loss.mean()
 
         with torch.no_grad():
             mrr = mrr_metric(similarity)

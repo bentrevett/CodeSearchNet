@@ -13,7 +13,6 @@ import os
 import random
 import functools
 
-import bpe
 import models
 import utils
 
@@ -23,6 +22,7 @@ PAD_TOKEN = '<pad>'
 parser = argparse.ArgumentParser()
 parser.add_argument('--lang', type=str, required=True)
 parser.add_argument('--model', type=str, required=True)
+parser.add_argument('--load', action='store_true')
 parser.add_argument('--code_max_length', type=int, default=200)
 parser.add_argument('--desc_max_length', type=int, default=30)
 parser.add_argument('--vocab_max_size', type=int, default=10_000)
@@ -47,8 +47,8 @@ parser.add_argument('--save_model', action='store_true')
 args = parser.parse_args()
 
 assert args.model in ['bow', 'lstm', 'gru', 'cnn', 'transformer']
-assert args.pool_mode in ['mean', 'max', 'weighted_mean']
-assert args.loss in ['softmax', 'cosine']
+assert args.pool_mode in ['max', 'weighted_mean']
+assert args.loss in ['softmax']
 
 if args.seed == None:
     args.seed = random.randint(0, 999)
@@ -58,6 +58,13 @@ args = utils.handle_args(args)
 run_name = utils.get_run_name(args)
 
 run_path = os.path.join('runs/', *run_name)
+
+if args.load:
+
+    code_load_path = f'lm_runs/lang={args.lang}/model={args.model}/data=code/vocab_max_size={args.vocab_max_size}/bpe_pct={args.bpe_pct}/batch_size={args.batch_size}/bptt=50/emb_dim={args.emb_dim}/hid_dim={args.hid_dim}/n_layers={args.n_layers}/n_heads={args.n_heads}/dropout={args.dropout}/lr={args.lr}/n_epochs={args.n_epochs}/patience={args.patience}/grad_clip={args.grad_clip}/seed=1/save_model=True'
+    code_load_path = f'lm_runs/lang={args.lang}/model={args.model}/data=desc/vocab_max_size={args.vocab_max_size}/bpe_pct={args.bpe_pct}/batch_size={args.batch_size}/bptt=50/emb_dim={args.emb_dim}/hid_dim={args.hid_dim}/n_layers={args.n_layers}/n_heads={args.n_heads}/dropout={args.dropout}/lr={args.lr}/n_epochs={args.n_epochs}/patience={args.patience}/grad_clip={args.grad_clip}/seed=1/save_model=True'
+
+    assert os.path.exists(code_load_path), code_load_path
 
 assert not os.path.exists(run_path)
 
@@ -255,6 +262,41 @@ elif args.model == 'transformer':
 else:
     raise ValueError(f'Model {args.model} not valid!')
 
+def initialize_parameters(m):
+    if isinstance(m, nn.Embedding):
+        init.xavier_uniform_(m.weight.data)
+    elif isinstance(m, (nn.GRU, nn.LSTM)):
+        for n, p in m.named_parameters():
+            if 'weight_ih' in n:
+                init.xavier_uniform_(p.data)
+            elif 'weight_hh' in n:
+                init.orthogonal_(p.data)
+            elif 'bias' in n:
+                p.data.fill_(0)
+            else:
+                print(n)
+    elif isinstance(m, nn.Linear):
+        init.xavier_uniform_(m.weight.data)
+        if m.bias is not None:
+            m.bias.data.fill_(0)
+
+if args.model == 'bow':
+
+    def initialize_parameters(m):
+        if isinstance(m, nn.Embedding):
+            init.xavier_uniform_(m.weight.data)
+        elif isinstance(m, nn.Linear):
+            init.xavier_uniform_(m.weight.data)
+            if m.bias is not None:
+                m.bias.data.fill_(0)
+        else:
+            raise ValueError
+
+    code_encoder.apply(initialize_parameters)
+    desc_encoder.apply(initialize_parameters)
+    code_pooler.apply(initialize_parameters)
+    desc_pooler.apply(initialize_parameters)
+
 if args.model == 'transformer':
 
     def truncated_normal_(tensor, mean=0, std=1):
@@ -275,6 +317,7 @@ if args.model == 'transformer':
     desc_encoder.apply(initialize_parameters)
     code_pooler.apply(initialize_parameters)
     desc_pooler.apply(initialize_parameters)
+
 else:
     code_encoder.apply(utils.initialize_parameters)
     desc_encoder.apply(utils.initialize_parameters)
@@ -308,6 +351,19 @@ elif args.loss == 'cosine':
     criterion = utils.CosineLoss(device)
 else:
     raise ValueError(f'Loss {args.loss} not valid!')
+
+if args.load:
+
+    if args.model == 'transformer':
+
+        code_load_path = os.path.join(code_load_path, 'language_model_model.pt')
+        desc_load_path = os.path.join(desc_load_path, 'language_model_model.pt')
+
+        code_encoder.load_state_dict(torch.load(code_load_path))
+        desc_encoder.load_state_dict(torch.load(desc_load_path))
+
+    else:
+        raise ValueError
 
 def train(code_encoder, desc_encoder, code_pooler, desc_pooler, iterator, optimizer, criterion):
 

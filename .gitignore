@@ -108,3 +108,4 @@ data/*
 .vscode/*
 runs/*
 *.pt
+lm_runs/*
