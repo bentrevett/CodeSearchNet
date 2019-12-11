@@ -12,18 +12,19 @@ for t in ['train', 'test', 'valid']:
 
     os.makedirs(f'data/6L/final/jsonl/{t}', exist_ok = True)
 
-    for language in ['go', 'java', 'javascript', 'php', 'python', 'ruby']:
+    with open(f'data/6L/final/jsonl/{t}/6L_{t}.jsonl', 'w+') as f:
 
-        iterator = file_iterator(f'data/{language}/final/jsonl/{t}/{language}_{t}.jsonl')
+        for language in ['go', 'java', 'javascript', 'php', 'python', 'ruby']:
 
-        with open(f'data/6L/final/jsonl/{t}/6L_{t}.jsonl', 'w+') as f:
+            iterator = file_iterator(f'data/{language}/final/jsonl/{t}/{language}_{t}.jsonl')
 
             for example in tqdm(iterator, desc=f'{language} {t}'):
 
                 code_tokens = example['code_tokens']
                 docstring_tokens = example['docstring_tokens']
+                func_name = example['func_name']
 
-                example = {'code_tokens': code_tokens, 'docstring_tokens': docstring_tokens, 'language': language}
+                example = {'code_tokens': code_tokens, 'docstring_tokens': docstring_tokens, 'language': language, 'func_name': func_name}
 
                 json.dump(example, f)
                 f.write('\n')

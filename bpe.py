@@ -280,9 +280,10 @@ if __name__ == '__main__':
 
                 code = example['code_tokens']
                 desc = example['docstring_tokens']
+                func_name = example['func_name'].split('.')[-1]
                 bpe_code = code_bpe_vocab.tokenize(code)
                 bpe_desc = desc_bpe_vocab.tokenize(desc)
-                example = {'code_tokens': bpe_code, 'docstring_tokens': bpe_desc}
+                example = {'code_tokens': bpe_code, 'docstring_tokens': bpe_desc, 'func_name': func_name}
 
                 json.dump(example, f)
                 f.write('\n')

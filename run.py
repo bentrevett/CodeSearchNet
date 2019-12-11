@@ -30,35 +30,21 @@ for seed in seeds:
     process = subprocess.Popen(command, shell=True)
     process.wait()"""
 
-command = f'python sequence_lm.py --lang java --model transformer --save_model --data desc --bpe_pct 0.5 --batch_size 450 --hid_dim 256 --n_layers 3 --lr 0.0005 --seed 1'
+"""command = f'python sequence_lm.py --lang java --model transformer --save_model --data desc --bpe_pct 0.5 --batch_size 450 --hid_dim 256 --n_layers 3 --lr 0.0005 --seed 1'
 process = subprocess.Popen(command, shell=True)
-process.wait()
+process.wait()"""
 
-command = f'python sequence_lm.py --lang 6L-java --model transformer --save_model --data code --bpe_pct 0.5 --batch_size 450 --hid_dim 256 --n_layers 3 --lr 0.0005 --seed 1'
+"""command = f'python sequence_lm.py --lang 6L-java --model transformer --save_model --data code --bpe_pct 0.5 --batch_size 450 --hid_dim 256 --n_layers 3 --lr 0.0005 --seed 1'
 process = subprocess.Popen(command, shell=True)
-process.wait()
+process.wait()"""
 
-command = f'python sequence_lm.py --lang 6L-java --model transformer --save_model --data desc --bpe_pct 0.5 --batch_size 450 --hid_dim 256 --n_layers 3 --lr 0.0005 --seed 1'
+"""command = f'python sequence_lm.py --lang 6L-java --model transformer --save_model --data desc --bpe_pct 0.5 --batch_size 450 --hid_dim 256 --n_layers 3 --lr 0.0005 --seed 1'
 process = subprocess.Popen(command, shell=True)
-process.wait()
+process.wait()"""
 
-###### NOT IN CURRENT RUN ########
-
-command = f'python sequence_lm.py --lang java-strip --model transformer --save_model --data code --bpe_pct 0.5 --batch_size 450 --hid_dim 256 --n_layers 3 --lr 0.0005 --seed 1'
+"""command = f'python main2.py --lang java --model transformer --bpe_pct 0.5 --batch_size 450 --hid_dim 256 --n_layers 3 --lr 0.0005 --seed 1 --load'
 process = subprocess.Popen(command, shell=True)
-process.wait()
-
-command = f'python sequence_lm.py --lang java-strip --model transformer --save_model --data desc --bpe_pct 0.5 --batch_size 450 --hid_dim 256 --n_layers 3 --lr 0.0005 --seed 1'
-process = subprocess.Popen(command, shell=True)
-process.wait()
-
-command = f'python main2.py --lang java --model transformer --bpe_pct 0.5 --batch_size 450 --hid_dim 256 --n_layers 3 --lr 0.0005 --seed 1 --load'
-process = subprocess.Popen(command, shell=True)
-process.wait()
-
-command = f'python main2.py --lang java-strip --model transformer --bpe_pct 0.5 --batch_size 450 --hid_dim 256 --n_layers 3 --lr 0.0005 --seed 1 --load'
-process = subprocess.Popen(command, shell=True)
-process.wait()
+process.wait()"""
 
 command = f'python main2.py --lang 6L-java --model transformer --bpe_pct 0.5 --batch_size 450 --hid_dim 256 --n_layers 3 --lr 0.0005 --seed 1 --load'
 process = subprocess.Popen(command, shell=True)

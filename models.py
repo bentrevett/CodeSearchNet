@@ -97,6 +97,73 @@ class EmbeddingPooler(nn.Module):
 
         return pooled
 
+class EmbeddingPredictor(nn.Module):
+    def __init__(self,
+                 emb_dim,
+                 output_dim,
+                 pool_mode):
+        super().__init__()
+
+        assert pool_mode in ['mean', 'max', 'weighted_mean']
+
+        self.pool_mode = pool_mode
+
+        if pool_mode == 'weighted_mean':
+            self.fc = nn.Linear(emb_dim, 1, bias = False)
+
+        self.fc_out = nn.Linear(emb_dim, output_dim)
+
+    def forward(self, 
+                embeddings,
+                mask):
+
+        #embeddings = [batch, emb dim, seq len]
+        #mask = [batch, seq len]
+
+        _, _, seq_len = embeddings.shape
+
+        mask = mask.unsqueeze(1)
+
+        #mask = [batch, 1, seq len]
+
+        if self.pool_mode == 'mean':
+            embeddings = embeddings.masked_fill(mask == 0, 0)
+            pooled = F.avg_pool1d(embeddings,
+                                  kernel_size = seq_len)
+
+        elif self.pool_mode == 'max':
+            embeddings = embeddings.masked_fill(mask == 0, -1e10)
+            pooled = F.max_pool1d(embeddings,
+                                  kernel_size = seq_len)
+
+        elif self.pool_mode == 'weighted_mean':
+            _embeddings = embeddings.permute(0, 2, 1)
+            #_embeddings = [batch, seq len, emb dim]
+            weights = torch.sigmoid(self.fc(_embeddings))
+            #weighs = [batch, seq len, 1]
+            weights = weights.permute(0, 2, 1)
+            #weights = [batch, 1, seq len]
+            weighted = embeddings * weights
+            weighted = weighted.masked_fill(mask == 0, 0)
+            #weighted = [batch, emb dim, seq len]
+            pooled = F.avg_pool1d(weighted,
+                                  kernel_size = seq_len)
+
+        else:
+            raise ValueError(f'Unknown pool mode: {self.pool_mode}')
+
+        #pooled = [batch size, emb dim, 1]
+
+        pooled = pooled.squeeze(-1)
+
+        #pooled = [batch size, emb dim]
+
+        prediction = self.fc_out(pooled)
+
+        #prediction = [batch size, output dim]
+
+        return prediction
+
 class BagOfWordsEncoder(nn.Module):
     def __init__(self,
                  input_dim,

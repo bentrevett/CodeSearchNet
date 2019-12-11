@@ -86,6 +86,26 @@ def mrr_metric(similarity):
     mrr = rr.mean()
     return mrr
 
+class SoftmaxLossPred(nn.Module):
+    def __init__(self,
+                 device):
+        super().__init__()
+
+        self.device = device
+
+    def forward(self, enc_code, labels):
+
+        #enc_code = [batch size, out dim]
+        #labels = [batch size]
+
+        loss = F.cross_entropy(enc_code, labels)
+
+        with torch.no_grad():
+            mrr = mrr_metric_pred(enc_code, labels)
+
+def mrr_metric_pred(enc_code, labels):
+    correct_scores = 
+
 def make_mask(sequence, pad_idx):
     mask = (sequence != pad_idx).permute(1, 0)
     return mask
