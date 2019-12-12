@@ -26,16 +26,14 @@ parser.add_argument('--data', type=str, required=True)
 parser.add_argument('--vocab_max_size', type=int, default=10_000)
 parser.add_argument('--vocab_min_freq', type=int, default=10)
 parser.add_argument('--bpe_pct', type=float, default=0.5)
-parser.add_argument('--batch_size', type=int, default=1000)
+parser.add_argument('--batch_size', type=int, default=450)
 parser.add_argument('--bptt', type=int, default=50)
 parser.add_argument('--emb_dim', type=int, default=128)
-parser.add_argument('--hid_dim', type=int, default=64)
-parser.add_argument('--n_layers', type=int, default=2)
-parser.add_argument('--bidirectional', action='store_true')
-parser.add_argument('--filter_size', type=int, default=16)
+parser.add_argument('--hid_dim', type=int, default=256)
+parser.add_argument('--n_layers', type=int, default=3)
 parser.add_argument('--n_heads', type=int, default=8)
 parser.add_argument('--dropout', type=float, default=0.1)
-parser.add_argument('--lr', type=float, default=0.01)
+parser.add_argument('--lr', type=float, default=0.0005)
 parser.add_argument('--n_epochs', type=int, default=500)
 parser.add_argument('--patience', type=int, default=5)
 parser.add_argument('--grad_clip', type=float, default=1.0)
@@ -44,12 +42,10 @@ parser.add_argument('--save_model', action='store_true')
 args = parser.parse_args()
 
 assert args.data in ['code', 'desc']
-assert args.model in ['bow', 'lstm', 'gru', 'cnn', 'transformer']
+assert args.model in ['transformer']
 
 if args.seed == None:
     args.seed = random.randint(0, 999)
-
-args = utils.handle_args(args)
 
 run_name = utils.get_run_name(args)
 
@@ -75,8 +71,8 @@ random.seed(args.seed)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 
-if args.lang.startswith('6L-'):
-    train_lang = '6L'
+if args.lang.startswith('6L-') or args.lang.startswith('5L-'):
+    train_lang = args.lang.split('-')[0]
     valid_lang = args.lang.split('-')[-1]
     test_lang = args.lang.split('-')[-1]
 else:
@@ -145,13 +141,7 @@ print('train/valid/test shape', [x.shape for x in [train_data, valid_data, test_
 
 device = torch.device('cuda')
 
-if args.model == 'bow':
-
-    model = models.BagOfWordsEncoder(len(vocab),
-                                     args.emb_dim,
-                                     args.dropout)
-
-elif args.model == 'transformer':
+if args.model == 'transformer':
     
     pad_idx = vocab[PAD_TOKEN]
 
@@ -167,42 +157,14 @@ elif args.model == 'transformer':
 else:
     raise ValueError
 
-if args.model == 'bow':
+if args.model == 'transformer':
 
-    def initialize_parameters(m):
-        if isinstance(m, nn.Embedding):
-            init.xavier_uniform_(m.weight.data)
-        elif isinstance(m, nn.Linear):
-            init.xavier_uniform_(m.weight.data)
-            if m.bias is not None:
-                m.bias.data.fill_(0)
-
-    model.apply(initialize_parameters)
-
-elif args.model == 'transformer':
-
-    def truncated_normal_(tensor, mean=0, std=1):
-        size = tensor.shape
-        tmp = tensor.new_empty(size + (4,)).normal_()
-        valid = (tmp < 2) & (tmp > -2)
-        ind = valid.max(-1, keepdim=True)[1]
-        tensor.data.copy_(tmp.gather(-1, ind).squeeze(-1))
-        tensor.data.mul_(std).add_(mean)
-
-    def initialize_parameters(m):
-        if isinstance(m, nn.LayerNorm):
-            pass
-        elif hasattr(m, 'weight'):
-            truncated_normal_(m.weight.data, std=0.02)
-
-    model.apply(initialize_parameters)
+    model.apply(utils.initialize_transformer)
 
 else:
     raise ValueError
 
 language_model = models.LanguageModel(model, args.emb_dim, len(vocab))
-
-print(language_model)
 
 print(f'Language model parameters: {utils.count_parameters(language_model):,}')
 

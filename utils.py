@@ -50,7 +50,7 @@ def batchify(data, batch_size):
     data = data.view(batch_size, -1).t().contiguous()
     return data
 
-class SoftmaxLoss(nn.Module):
+class SoftmaxLossRet(nn.Module):
     def __init__(self,
                  device):
         super().__init__()
@@ -75,11 +75,11 @@ class SoftmaxLoss(nn.Module):
         loss = F.cross_entropy(similarity, classes)
 
         with torch.no_grad():
-            mrr = mrr_metric(similarity)
+            mrr = mrr_metric_ret(similarity)
 
         return loss, mrr
 
-def mrr_metric(similarity):
+def mrr_metric_ret(similarity):
     correct_scores = torch.diagonal(similarity)
     compared_scores = similarity >= correct_scores.unsqueeze(-1)
     rr = 1 / compared_scores.float().sum(-1)
@@ -98,70 +98,38 @@ class SoftmaxLossPred(nn.Module):
         #enc_code = [batch size, out dim]
         #labels = [batch size]
 
+        labels = labels.squeeze(0)
+
         loss = F.cross_entropy(enc_code, labels)
 
         with torch.no_grad():
             mrr = mrr_metric_pred(enc_code, labels)
 
+        return loss, mrr
+
 def mrr_metric_pred(enc_code, labels):
-    correct_scores = 
+    n_classes = enc_code.shape[-1]
+    one_hot = F.one_hot(labels, n_classes)
+    actual_score = (enc_code * one_hot).sum(-1).unsqueeze(-1).repeat(1, n_classes)
+    compared_scores = enc_code >= actual_score
+    rr = 1/compared_scores.float().sum(-1)
+    mrr = rr.mean()
+    return mrr
 
 def make_mask(sequence, pad_idx):
     mask = (sequence != pad_idx).permute(1, 0)
     return mask
 
-def initialize_parameters(m):
-    if isinstance(m, nn.Embedding):
-        init.xavier_uniform_(m.weight.data)
-    elif isinstance(m, (nn.GRU, nn.LSTM)):
-        for n, p in m.named_parameters():
-            if 'weight_ih' in n:
-                init.xavier_uniform_(p.data)
-            elif 'weight_hh' in n:
-                init.orthogonal_(p.data)
-            elif 'bias' in n:
-                p.data.fill_(0)
-            else:
-                print(n)
-    elif isinstance(m, nn.Linear):
-        init.xavier_uniform_(m.weight.data)
-        if m.bias is not None:
-            m.bias.data.fill_(0)
+def truncated_normal_(tensor, mean=0, std=1):
+        size = tensor.shape
+        tmp = tensor.new_empty(size + (4,)).normal_()
+        valid = (tmp < 2) & (tmp > -2)
+        ind = valid.max(-1, keepdim=True)[1]
+        tensor.data.copy_(tmp.gather(-1, ind).squeeze(-1))
+        tensor.data.mul_(std).add_(mean)
 
-def handle_args(args):
-
-    if args.model == 'bow':
-        del args.hid_dim
-        del args.n_layers
-        del args.bidirectional
-        del args.filter_size
-        del args.n_heads
-
-    elif args.model in ['gru', 'lstm']:
-        del args.filter_size
-        del args.n_heads
-
-    elif args.model == 'cnn':
-        del args.hid_dim
-        del args.bidirectional
-        del args.n_heads
-
-    elif args.model == 'transformer':
-        del args.bidirectional
-        del args.filter_size
-
-    else:
-        raise ValueError(f'Model {args.model} not valid!')
-
-    if args.bpe_pct > 0:
-        del args.vocab_min_freq
-
-    return args
-
-if __name__ == '__main__':
-
-    x = torch.randn(3,3)
-
-    print(x)
-
-    mrr_metric(x)
+def initialize_transformer(m):
+    if isinstance(m, nn.LayerNorm):
+        pass
+    elif hasattr(m, 'weight'):
+        truncated_normal_(m.weight.data, std=0.02)

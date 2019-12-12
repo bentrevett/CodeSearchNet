@@ -109,3 +109,6 @@ data/*
 runs/*
 *.pt
 lm_runs/*
+old/*
+ret_runs/*
+pred_runs/*

@@ -28,17 +28,15 @@ parser.add_argument('--desc_max_length', type=int, default=30)
 parser.add_argument('--vocab_max_size', type=int, default=10_000)
 parser.add_argument('--vocab_min_freq', type=int, default=10)
 parser.add_argument('--bpe_pct', type=float, default=0.5)
-parser.add_argument('--batch_size', type=int, default=1000)
+parser.add_argument('--batch_size', type=int, default=450)
 parser.add_argument('--emb_dim', type=int, default=128)
-parser.add_argument('--hid_dim', type=int, default=64)
-parser.add_argument('--n_layers', type=int, default=2)
-parser.add_argument('--bidirectional', action='store_true')
-parser.add_argument('--filter_size', type=int, default=16)
+parser.add_argument('--hid_dim', type=int, default=256)
+parser.add_argument('--n_layers', type=int, default=3)
 parser.add_argument('--n_heads', type=int, default=8)
 parser.add_argument('--dropout', type=float, default=0.1)
 parser.add_argument('--pool_mode', type=str, default='weighted_mean')
 parser.add_argument('--loss', type=str, default='softmax')
-parser.add_argument('--lr', type=float, default=0.01)
+parser.add_argument('--lr', type=float, default=0.0005)
 parser.add_argument('--n_epochs', type=int, default=500)
 parser.add_argument('--patience', type=int, default=5)
 parser.add_argument('--grad_clip', type=float, default=1.0)
@@ -46,18 +44,16 @@ parser.add_argument('--seed', type=int, default=None)
 parser.add_argument('--save_model', action='store_true')
 args = parser.parse_args()
 
-assert args.model in ['bow', 'lstm', 'gru', 'cnn', 'transformer']
+assert args.model in ['transformer']
 assert args.pool_mode in ['max', 'weighted_mean']
 assert args.loss in ['softmax']
 
 if args.seed == None:
     args.seed = random.randint(0, 999)
 
-args = utils.handle_args(args)
-
 run_name = utils.get_run_name(args)
 
-run_path = os.path.join('runs/', *run_name)
+run_path = os.path.join('ret_runs/', *run_name)
 
 if args.load:
 
@@ -87,8 +83,8 @@ random.seed(args.seed)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 
-if args.lang.startswith('6L-'):
-    train_lang = '6L'
+if args.lang.startswith('6L-') or args.lang.startswith('5L-'):
+    train_lang = args.lang.split('-')[0]
     valid_lang = args.lang.split('-')[-1]
     test_lang = args.lang.split('-')[-1]
 else:
@@ -169,69 +165,7 @@ train_iterator, valid_iterator, test_iterator = data.BucketIterator.splits(
                                                     device = device,
                                                     sort_key = lambda x : x.code)
 
-if args.model == 'bow':
-
-    code_encoder = models.BagOfWordsEncoder(len(code_vocab),
-                                            args.emb_dim,
-                                            args.dropout)
-
-    desc_encoder = models.BagOfWordsEncoder(len(desc_vocab),
-                                            args.emb_dim,
-                                            args.dropout)
-
-    code_pooler = models.EmbeddingPooler(args.emb_dim,
-                                         args.pool_mode)
-
-    desc_pooler = models.EmbeddingPooler(args.emb_dim,
-                                         args.pool_mode)
-
-elif args.model in ['gru', 'lstm']:
-
-    code_encoder = models.RNNEncoder(len(code_vocab),
-                                     args.emb_dim,
-                                     args.hid_dim,
-                                     args.n_layers,
-                                     args.bidirectional,
-                                     args.dropout,
-                                     args.model)
-
-    desc_encoder = models.RNNEncoder(len(desc_vocab),
-                                     args.emb_dim,
-                                     args.hid_dim,
-                                     args.n_layers,
-                                     args.bidirectional,
-                                     args.dropout,
-                                     args.model)
-
-    code_pooler = models.EmbeddingPooler(args.hid_dim * 2 if args.bidirectional else args.hid_dim,
-                                         args.pool_mode)
-                                         
-    desc_pooler = models.EmbeddingPooler(args.hid_dim * 2 if args.bidirectional else args.hid_dim,
-                                         args.pool_mode)
-
-elif args.model == 'cnn':
-
-    code_encoder = models.CNNEncoder(len(code_vocab),
-                                     args.emb_dim,
-                                     args.filter_size,
-                                     args.n_layers,
-                                     args.dropout,
-                                     device)
-
-    desc_encoder = models.CNNEncoder(len(desc_vocab),
-                                     args.emb_dim,
-                                     args.filter_size,
-                                     args.n_layers,
-                                     args.dropout,
-                                     device)
-
-    code_pooler = models.EmbeddingPooler(args.emb_dim,
-                                         args.pool_mode)
-
-    desc_pooler = models.EmbeddingPooler(args.emb_dim,
-                                         args.pool_mode)
-
-elif args.model == 'transformer':
+if args.model == 'transformer':
 
     code_pad_idx = code_vocab[PAD_TOKEN]
     desc_pad_idx = desc_vocab[PAD_TOKEN]
@@ -263,77 +197,20 @@ elif args.model == 'transformer':
 else:
     raise ValueError(f'Model {args.model} not valid!')
 
-def initialize_parameters(m):
-    if isinstance(m, nn.Embedding):
-        init.xavier_uniform_(m.weight.data)
-    elif isinstance(m, (nn.GRU, nn.LSTM)):
-        for n, p in m.named_parameters():
-            if 'weight_ih' in n:
-                init.xavier_uniform_(p.data)
-            elif 'weight_hh' in n:
-                init.orthogonal_(p.data)
-            elif 'bias' in n:
-                p.data.fill_(0)
-            else:
-                print(n)
-    elif isinstance(m, nn.Linear):
-        init.xavier_uniform_(m.weight.data)
-        if m.bias is not None:
-            m.bias.data.fill_(0)
-
-if args.model == 'bow':
-
-    def initialize_parameters(m):
-        if isinstance(m, nn.Embedding):
-            init.xavier_uniform_(m.weight.data)
-        elif isinstance(m, nn.Linear):
-            init.xavier_uniform_(m.weight.data)
-            if m.bias is not None:
-                m.bias.data.fill_(0)
-        else:
-            raise ValueError
-
-    code_encoder.apply(initialize_parameters)
-    desc_encoder.apply(initialize_parameters)
-    code_pooler.apply(initialize_parameters)
-    desc_pooler.apply(initialize_parameters)
-
 if args.model == 'transformer':
 
-    def truncated_normal_(tensor, mean=0, std=1):
-        size = tensor.shape
-        tmp = tensor.new_empty(size + (4,)).normal_()
-        valid = (tmp < 2) & (tmp > -2)
-        ind = valid.max(-1, keepdim=True)[1]
-        tensor.data.copy_(tmp.gather(-1, ind).squeeze(-1))
-        tensor.data.mul_(std).add_(mean)
-
-    def initialize_parameters(m):
-        if isinstance(m, nn.LayerNorm):
-            pass
-        elif hasattr(m, 'weight'):
-            truncated_normal_(m.weight.data, std=0.02)
-
-    code_encoder.apply(initialize_parameters)
-    desc_encoder.apply(initialize_parameters)
-    code_pooler.apply(initialize_parameters)
-    desc_pooler.apply(initialize_parameters)
+    code_encoder.apply(utils.initialize_transformer)
+    desc_encoder.apply(utils.initialize_transformer)
+    code_pooler.apply(utils.initialize_transformer)
+    desc_pooler.apply(utils.initialize_transformer)
 
 else:
-    code_encoder.apply(utils.initialize_parameters)
-    desc_encoder.apply(utils.initialize_parameters)
-    code_pooler.apply(utils.initialize_parameters)
-    desc_pooler.apply(utils.initialize_parameters)
+    raise ValueError(f'Model {args.model} not valid!')
 
 code_encoder = code_encoder.to(device)
 desc_encoder = desc_encoder.to(device)
 code_pooler = code_pooler.to(device)
 desc_pooler = desc_pooler.to(device)
-
-print(code_encoder)
-print(desc_encoder)
-print(code_pooler)
-print(desc_pooler)
 
 print(f'Code Encoder parameters: {utils.count_parameters(code_encoder):,}')
 print(f'Desc Encoder parameters: {utils.count_parameters(desc_encoder):,}')
@@ -347,11 +224,9 @@ optimizer = optim.Adam([{'params': code_encoder.parameters()},
                         lr = args.lr)
 
 if args.loss == 'softmax':
-    criterion = utils.SoftmaxLoss(device)
-elif args.loss == 'cosine':
-    criterion = utils.CosineLoss(device)
+    criterion = utils.SoftmaxLossRet(device)
 else:
-    raise ValueError(f'Loss {args.loss} not valid!')
+    raise ValueError
 
 if args.load:
 
